@@ -1,0 +1,17 @@
+# Credentials and secrets
+json_folder/credentials.json
+others/github_commads
+*.json
+.env
+*token*
+*key*
+*secret*
+
+# Virtual environment
+myvenv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
