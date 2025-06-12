@@ -1,8 +1,10 @@
-from config import WEBCAM_URL
+# controllers/student.py - Updated for RPi Camera 3
+
 from services.fingerprint import authenticate_fingerprint
 from services.license_reader import *
 from services.helmet_infer import verify_helmet
 from services.time_tracker import *
+from services.led_control import set_led_processing, set_led_success, set_led_idle
 
 from utils.display_helpers import display_separator, display_verification_result
 from utils.gui_helpers import show_results_gui
@@ -10,11 +12,16 @@ from utils.gui_helpers import show_results_gui
 import time
 
 def student_verification():
-    """Main student verification workflow with integrated time tracking"""
+    """Main student verification workflow with integrated time tracking and LED status"""
     print("\n🎓 STUDENT VERIFICATION & TIME TRACKING SYSTEM")
+    
+    # Set LED to processing state when student verification starts
+    set_led_processing()
     
     # Step 1: Helmet verification (always required)
     if not verify_helmet_check():
+        print("❌ Helmet verification failed - returning to idle state")
+        set_led_idle()  # Return to idle on failure
         input("\n📱 Press Enter to return to main menu...")
         return
     
@@ -24,6 +31,7 @@ def student_verification():
     
     if not student_info:
         print("❌ Authentication failed. Access denied.")
+        set_led_idle()  # Return to idle on failure
         input("\n📱 Press Enter to return to main menu...")
         return
     
@@ -40,12 +48,12 @@ def student_verification():
         
         # Step 4: License verification for TIME IN
         print("📄 Starting license verification...")
-        image_path = auto_capture_license_ip(WEBCAM_URL, 
-                                           reference_name=student_info['name'], 
+        image_path = auto_capture_license_rpi(reference_name=student_info['name'], 
                                            fingerprint_info=student_info)
         
         if not image_path:
             print("❌ License capture failed or cancelled.")
+            set_led_idle()  # Return to idle on failure
             input("\n📱 Press Enter to return to main menu...")
             return
         
@@ -73,8 +81,11 @@ def student_verification():
             # Record time in for successful verification
             if record_time_in(student_info):
                 time_message = f"🟢 TIME IN recorded at {time.strftime('%H:%M:%S')}"
+                # Set LED to success (green) for successful time in
+                set_led_success(duration=5.0)  # Green for 5 seconds, then auto-return to idle
             else:
                 time_message = "❌ Failed to record TIME IN"
+                set_led_idle()  # Return to idle on database failure
             
             print(f"\n🕒 {time_message}")
             
@@ -82,10 +93,12 @@ def student_verification():
             overall_status = "⚠️ PARTIAL VERIFICATION - TIME IN DENIED"
             status_color = "🟡"
             time_message = "❌ Time IN denied due to incomplete verification"
+            set_led_idle()  # Return to idle on partial verification
         else:
             overall_status = "❌ VERIFICATION FAILED - TIME IN DENIED"
             status_color = "🔴"
             time_message = "❌ Time IN denied due to failed verification"
+            set_led_idle()  # Return to idle on failed verification
         
         gui_message = f"""
 TIME IN Verification Complete!
@@ -114,10 +127,13 @@ Status: {overall_status}
             overall_status = "✅ TIME OUT SUCCESSFUL"
             status_color = "🟢"
             time_message = f"🔴 TIME OUT recorded at {time.strftime('%H:%M:%S')}"
+            # Set LED to success (green) for successful time out
+            set_led_success(duration=5.0)  # Green for 5 seconds, then auto-return to idle
         else:
             overall_status = "❌ TIME OUT FAILED"
             status_color = "🔴"
             time_message = "❌ Failed to record TIME OUT"
+            set_led_idle()  # Return to idle on failure
         
         print(f"\n🕒 {time_message}")
         
@@ -143,14 +159,14 @@ Status: {overall_status}
     display_verification_result(student_info, verification_data)
     input("\n📱 Press Enter to return to main menu...")
     
+    # Note: LED will either be in success state (auto-returning to idle) or already in idle state
+    
 # =================== VERIFICATION FUNCTIONS ===================
 
 def verify_helmet_check():
     """Verify helmet is being worn"""
-    if not verify_helmet(WEBCAM_URL):
+    if not verify_helmet():
         print("❌ Helmet verification failed. You must wear a FULL-FACE helmet.")
         return False
     print("✅ Helmet verification passed!")
     return True
-
-

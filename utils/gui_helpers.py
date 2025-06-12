@@ -116,6 +116,7 @@ def updated_guest_office_gui(guest_name, current_office):
         selected_office = office_var.get()
         
         guest_data.update({
+			'name': guest_name, 
             'office': selected_office,
             'updated': True
         })

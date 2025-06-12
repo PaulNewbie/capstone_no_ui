@@ -1,3 +1,5 @@
+# services/time_tracker.py
+
 import sqlite3
 from datetime import datetime
 
@@ -6,7 +8,7 @@ def get_student_time_status(student_id):
     Returns the most recent time status ('IN' or 'OUT') for a given student_id.
     """
     try:
-        conn = sqlite3.connect("time_tracking.db")
+        conn = sqlite3.connect("database/time_tracking.db")
         cursor = conn.cursor()
         cursor.execute("""
             SELECT status FROM time_records
@@ -31,7 +33,7 @@ def record_time_in(student_info):
         date = now.strftime("%Y-%m-%d")
         time = now.strftime("%H:%M:%S")
 
-        conn = sqlite3.connect("time_tracking.db")
+        conn = sqlite3.connect("database/time_tracking.db")
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO time_records (student_id, student_name, date, time, status)
@@ -55,7 +57,7 @@ def record_time_out(student_info):
         date = now.strftime("%Y-%m-%d")
         time = now.strftime("%H:%M:%S")
 
-        conn = sqlite3.connect("time_tracking.db")
+        conn = sqlite3.connect("database/time_tracking.db")
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO time_records (student_id, student_name, date, time, status)

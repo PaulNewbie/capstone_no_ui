@@ -50,8 +50,8 @@ def cleanup_guest_data():
         import os
         
         # Remove old guest_info.db if it exists
-        if os.path.exists("guest_info.db"):
-            os.remove("guest_info.db")
+        if os.path.exists("database/guest_info.db"):
+            os.remove("database/guest_info.db")
             print("✅ Removed old guest_info.db")
         
         # Clean up any malformed guest records in time_tracking.db

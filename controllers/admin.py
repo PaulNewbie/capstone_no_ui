@@ -1,3 +1,5 @@
+# controllers/admin.py
+
 from config import ADMIN_MENU
 from services.fingerprint import *
 from services.time_tracker import *
@@ -106,7 +108,7 @@ def admin_sync_database():
         sheet = client.open("MotorPass (Responses)").sheet1
         rows = sheet.get_all_records()
         
-        conn = sqlite3.connect("students.db")
+        conn = sqlite3.connect("database/students.db")
         cursor = conn.cursor()
         
         cursor.execute('''

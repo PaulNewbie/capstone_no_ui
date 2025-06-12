@@ -1,4 +1,5 @@
-# fingerprint.py - MotorPass Fingerprint Authentication Module with Student Database Integration and Time Tracking
+# services/fingerprint.py - Clean fingerprint service with minimal logging
+
 import time
 import serial
 import adafruit_fingerprint
@@ -9,14 +10,13 @@ import tkinter as tk
 from tkinter import simpledialog, messagebox
 
 # =================== FINGERPRINT SETUP ===================
-# If using with Linux/Raspberry Pi and hardware UART:
 uart = serial.Serial("/dev/ttyS0", baudrate=57600, timeout=1)
 finger = adafruit_fingerprint.Adafruit_Fingerprint(uart)
 
 # =================== DATA STORAGE ===================
 FINGERPRINT_DATA_FILE = "json_folder/fingerprint_database.json"
-STUDENT_DB_FILE = "students.db"
-TIME_TRACKING_DB = "time_tracking.db"
+STUDENT_DB_FILE = "database/students.db"
+TIME_TRACKING_DB = "database/time_tracking.db"
 
 def load_fingerprint_database():
     """Load fingerprint database from JSON file"""
@@ -58,8 +58,7 @@ def get_student_by_id(student_id):
             }
         return None
         
-    except sqlite3.Error as e:
-        print(f"❌ Database error: {e}")
+    except sqlite3.Error:
         return None
 
 # =================== TIME TRACKING DATABASE FUNCTIONS ===================
@@ -94,8 +93,7 @@ def init_time_database():
         conn.commit()
         conn.close()
         return True
-    except sqlite3.Error as e:
-        print(f"❌ Time database initialization error: {e}")
+    except sqlite3.Error:
         return False
 
 def get_student_time_status(student_id):
@@ -114,8 +112,7 @@ def get_student_time_status(student_id):
         
         return result[0] if result else 'OUT'
         
-    except sqlite3.Error as e:
-        print(f"❌ Error checking time status: {e}")
+    except sqlite3.Error:
         return 'OUT'
 
 def record_time_in(student_info):
@@ -127,13 +124,11 @@ def record_time_in(student_info):
         current_date = time.strftime('%Y-%m-%d')
         current_time = time.strftime('%H:%M:%S')
         
-        # Record time in
         cursor.execute('''
             INSERT INTO time_records (student_id, student_name, date, time, status)
             VALUES (?, ?, ?, ?, ?)
         ''', (student_info['student_id'], student_info['name'], current_date, current_time, 'IN'))
         
-        # Update current status
         cursor.execute('''
             INSERT OR REPLACE INTO current_status (student_id, student_name, current_status)
             VALUES (?, ?, ?)
@@ -143,8 +138,7 @@ def record_time_in(student_info):
         conn.close()
         return True
         
-    except sqlite3.Error as e:
-        print(f"❌ Error recording time in: {e}")
+    except sqlite3.Error:
         return False
 
 def record_time_out(student_info):
@@ -156,13 +150,11 @@ def record_time_out(student_info):
         current_date = time.strftime('%Y-%m-%d')
         current_time = time.strftime('%H:%M:%S')
         
-        # Record time out
         cursor.execute('''
             INSERT INTO time_records (student_id, student_name, date, time, status)
             VALUES (?, ?, ?, ?, ?)
         ''', (student_info['student_id'], student_info['name'], current_date, current_time, 'OUT'))
         
-        # Update current status
         cursor.execute('''
             INSERT OR REPLACE INTO current_status (student_id, student_name, current_status)
             VALUES (?, ?, ?)
@@ -172,8 +164,7 @@ def record_time_out(student_info):
         conn.close()
         return True
         
-    except sqlite3.Error as e:
-        print(f"❌ Error recording time out: {e}")
+    except sqlite3.Error:
         return False
 
 def record_time_attendance(student_info):
@@ -181,13 +172,11 @@ def record_time_attendance(student_info):
     current_status = get_student_time_status(student_info['student_id'])
     
     if current_status == 'OUT' or current_status is None:
-        # Student is OUT, record TIME IN
         if record_time_in(student_info):
             return f"🟢 TIME IN recorded for {student_info['name']} at {time.strftime('%H:%M:%S')}"
         else:
             return "❌ Failed to record TIME IN"
     else:
-        # Student is IN, record TIME OUT
         if record_time_out(student_info):
             return f"🔴 TIME OUT recorded for {student_info['name']} at {time.strftime('%H:%M:%S')}"
         else:
@@ -219,8 +208,7 @@ def get_all_time_records():
         conn.close()
         return records
         
-    except sqlite3.Error as e:
-        print(f"❌ Error fetching time records: {e}")
+    except sqlite3.Error:
         return []
 
 def clear_all_time_records():
@@ -236,8 +224,7 @@ def clear_all_time_records():
         conn.close()
         return True
         
-    except sqlite3.Error as e:
-        print(f"❌ Error clearing time records: {e}")
+    except sqlite3.Error:
         return False
 
 def get_students_currently_in():
@@ -264,8 +251,7 @@ def get_students_currently_in():
         conn.close()
         return students
         
-    except sqlite3.Error as e:
-        print(f"❌ Error fetching current students: {e}")
+    except sqlite3.Error:
         return []
 
 # =================== GUI FUNCTIONS ===================
@@ -278,17 +264,14 @@ def get_student_id_gui():
     while True:
         student_id = simpledialog.askstring("Student Enrollment", "Enter Student Number:")
         
-        if not student_id:  # User cancelled
+        if not student_id:
             root.destroy()
             return None
         
         student_id = student_id.strip()
-        
-        # Fetch student information from database
         student_info = get_student_by_id(student_id)
         
         if student_info:
-            # Show confirmation dialog with student information
             confirmation_message = f"""
 Student Information Found:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -308,9 +291,8 @@ Proceed with fingerprint enrollment for this student?
                 root.destroy()
                 return student_info
             else:
-                continue  # Ask for student ID again
+                continue
         else:
-            # Student not found
             retry = messagebox.askyesno(
                 "Student Not Found", 
                 f"Student ID '{student_id}' not found in database.\n\nWould you like to try again?"
@@ -345,18 +327,15 @@ def enroll_finger_with_student_info(location):
     """Enhanced enrollment using Student ID to fetch complete student information"""
     print(f"\n🔒 Starting enrollment for slot #{location}")
     
-    # Get student information by Student ID
     student_info = get_student_id_gui()
     if not student_info:
         print("❌ No student selected. Enrollment cancelled.")
         return False
     
-    # Display student information
     display_student_info(student_info)
-    
     print(f"👤 Enrolling fingerprint for: {student_info['full_name']}")
     
-    # Existing fingerprint enrollment process
+    # Fingerprint enrollment process with minimal logging
     for fingerimg in range(1, 3):
         if fingerimg == 1:
             print("👆 Place finger on sensor...", end="")
@@ -366,7 +345,7 @@ def enroll_finger_with_student_info(location):
         while True:
             i = finger.get_image()
             if i == adafruit_fingerprint.OK:
-                print("✅ Image taken")
+                print("✅")
                 break
             if i == adafruit_fingerprint.NOFINGER:
                 print(".", end="")
@@ -377,10 +356,10 @@ def enroll_finger_with_student_info(location):
                 print("❌ Other error")
                 return False
 
-        print("🔄 Templating...", end="")
+        print("🔄 Processing...", end="")
         i = finger.image_2_tz(fingerimg)
         if i == adafruit_fingerprint.OK:
-            print("✅ Templated")
+            print("✅")
         else:
             if i == adafruit_fingerprint.IMAGEMESS:
                 print("❌ Image too messy")
@@ -401,7 +380,7 @@ def enroll_finger_with_student_info(location):
     print("🗝️ Creating model...", end="")
     i = finger.create_model()
     if i == adafruit_fingerprint.OK:
-        print("✅ Created")
+        print("✅")
     else:
         if i == adafruit_fingerprint.ENROLLMISMATCH:
             print("❌ Prints did not match")
@@ -412,9 +391,9 @@ def enroll_finger_with_student_info(location):
     print(f"💾 Storing model #{location}...", end="")
     i = finger.store_model(location)
     if i == adafruit_fingerprint.OK:
-        print("✅ Stored")
+        print("✅")
         
-        # Save complete student information in fingerprint database
+        # Save student information
         database = load_fingerprint_database()
         database[str(location)] = {
             "name": student_info['full_name'],
@@ -428,7 +407,6 @@ def enroll_finger_with_student_info(location):
         
         print(f"🎉 Successfully enrolled {student_info['full_name']} at slot #{location}")
         
-        # Show success message with complete information
         success_message = f"""
 Enrollment Successful! ✅
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -456,7 +434,6 @@ def authenticate_fingerprint():
     """Authenticate fingerprint and return complete student information"""
     print("\n🔒 Please place your finger on the sensor for authentication...")
     
-    # Get fingerprint
     while finger.get_image() != adafruit_fingerprint.OK:
         pass
     
@@ -470,7 +447,6 @@ def authenticate_fingerprint():
         print("❌ No matching fingerprint found")
         return None
     
-    # Get complete student information from database
     database = load_fingerprint_database()
     finger_id = str(finger.finger_id)
     
@@ -513,14 +489,12 @@ def authenticate_fingerprint_with_time_tracking():
     if not student_info or student_info['student_id'] == 'N/A':
         return student_info
     
-    # Automatically handle time tracking
     time_status = record_time_attendance(student_info)
     print(f"🕒 {time_status}")
     
     return student_info
 
 # =================== LEGACY SUPPORT ===================
-# Keep the old function for backward compatibility
 def enroll_finger_with_name(location):
     """Legacy function - now redirects to the new student-based enrollment"""
     print("⚠️ Using legacy enrollment method. Consider using enroll_finger_with_student_info() instead.")

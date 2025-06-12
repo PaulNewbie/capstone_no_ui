@@ -1,13 +1,15 @@
-# license_reader.py - Philippine Driver's License OCR System
+# services/license_reader.py - Philippine Driver's License OCR System - Updated for RPi Camera 3
 
 import cv2
 import numpy as np
 import pytesseract
 import re
 import difflib 
-import urllib.request
 from typing import Dict, List
 from dataclasses import dataclass
+from services.rpi_camera import get_camera
+import os
+from datetime import datetime
 
 # ============== DATA STRUCTURES & CONFIGURATION ==============
 
@@ -116,7 +118,6 @@ def format_text_output(raw_text: str) -> str:
             cleaned.append(sanitized)
     return "\n".join(cleaned)
 
-
 # =========== LICENSE VERIFICATION & NAME EXTRACTION ==========
 
 def extract_name_from_lines(image_path: str, reference_name: str = "", 
@@ -199,132 +200,146 @@ def package_name_info(structured_data: Dict[str, str], basic_text: str,
         fingerprint_info=fingerprint_info
     )
 
-#============== IP WEBCAM INTEGRATION ==============
+# ============== RPi CAMERA 3 LICENSE CAPTURE ==============
 
-class IPWebcam:
-    """Handle IP webcam connection and frame capture"""
+def auto_capture_license_rpi(reference_name="", fingerprint_info=None):
+    """Auto-capture license using RPi Camera 3 with real-time detection - NO FILE SAVING"""
     
-    def __init__(self, url: str):
-        self.url = url
-        self.last_frame = None
-        self.connection_stable = True
-    
-    def get_frame(self):
-        """Capture frame from IP webcam with error handling"""
-        try:
-            img_resp = urllib.request.urlopen(self.url, timeout=5)
-            img_np = np.array(bytearray(img_resp.read()), dtype=np.uint8)
-            frame = cv2.imdecode(img_np, -1)
-            
-            if frame is not None:
-                self.last_frame = frame.copy()
-                self.connection_stable = True
-                return frame
-            else:
-                self.connection_stable = False
-                return self.last_frame if self.last_frame is not None else np.zeros((480, 640, 3), dtype=np.uint8)
-                
-        except Exception:
-            self.connection_stable = False
-            return self.last_frame if self.last_frame is not None else np.zeros((480, 640, 3), dtype=np.uint8)
-
-def auto_capture_license_ip(ip_webcam_url: str, output_path="license.jpg", 
-                           reference_name="", fingerprint_info=None):
-    """Auto-capture license using IP webcam with real-time detection"""
-    
-    webcam = IPWebcam(ip_webcam_url)
-    
-    # Test connection
-    test_frame = webcam.get_frame()
-    if test_frame is None:
+    # Get camera instance
+    camera = get_camera()
+    if not camera.initialized:
+        print("❌ RPi Camera not initialized")
         return None
     
+    # Create a temporary filename for processing (but won't actually save)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    if fingerprint_info and 'student_id' in fingerprint_info:
+        temp_filename = f"temp_license_{fingerprint_info['student_id']}_{timestamp}.jpg"
+    else:
+        temp_filename = f"temp_license_{timestamp}.jpg"
+    
+    print("📷 Using Raspberry Pi Camera 3")
+    print(f"📱 Target: {reference_name}" if reference_name else "📱 Guest License Capture")
+    
     # Display setup
-    screen_dims = {'width': 720, 'height': 1280, 'box_width': 600, 'box_height': 350}
+    screen_dims = {'width': 720, 'height': 600, 'box_width': 600, 'box_height': 350}
     frame_count = 0
     detection_threshold = 2
     consecutive_detections = 0
+    captured_frame = None
     
     cv2.namedWindow("MotorPass - License Capture", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("MotorPass - License Capture", screen_dims['width'], 600)
+    cv2.resizeWindow("MotorPass - License Capture", screen_dims['width'], screen_dims['height'])
     
-    while True:
-        frame = webcam.get_frame()
-        if frame is None:
-            break
-        
-        # Scale frame for display
-        original_h, original_w = frame.shape[:2]
-        scale = min(screen_dims['width'] / original_w, 600 / original_h)
-        new_w, new_h = int(original_w * scale), int(original_h * scale)
-        display_frame = cv2.resize(frame, (new_w, new_h))
-        
-        # Define detection box
-        box_width = min(screen_dims['box_width'], new_w - 40)
-        box_height = min(screen_dims['box_height'], new_h - 40)
-        center_x, center_y = new_w // 2, new_h // 2
-        box_x1 = max(0, center_x - box_width // 2)
-        box_y1 = max(0, center_y - box_height // 2)
-        box_x2 = min(new_w, center_x + box_width // 2)
-        box_y2 = min(new_h, center_y + box_height // 2)
-        
-        # Extract ROI and detect license
-        orig_box_x1, orig_box_y1 = int(box_x1 / scale), int(box_y1 / scale)
-        orig_box_x2, orig_box_y2 = int(box_x2 / scale), int(box_y2 / scale)
-        roi = frame[orig_box_y1:orig_box_y2, orig_box_x1:orig_box_x2]
-        
-        # License detection every 10 frames
-        frame_count += 1
-        if frame_count % 10 == 0 and roi.size > 0:
-            try:
-                gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                thresh_roi = cv2.threshold(gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
-                quick_text = pytesseract.image_to_string(thresh_roi, config='--psm 6 --oem 3').upper()
-                
-                matched_keywords = sum(1 for kw in VERIFICATION_KEYWORDS if kw in quick_text)
-                consecutive_detections = consecutive_detections + 1 if matched_keywords >= 2 else 0
+    print("🔍 License detection started...")
+    print("📱 Press 'q' to quit, 's' to manually capture")
+    
+    try:
+        while True:
+            frame = camera.get_frame()
+            if frame is None:
+                print("❌ Failed to get frame from camera")
+                break
+            
+            # Scale frame for display
+            original_h, original_w = frame.shape[:2]
+            scale = min(screen_dims['width'] / original_w, screen_dims['height'] / original_h)
+            new_w, new_h = int(original_w * scale), int(original_h * scale)
+            display_frame = cv2.resize(frame, (new_w, new_h))
+            
+            # Define detection box
+            box_width = min(screen_dims['box_width'], new_w - 40)
+            box_height = min(screen_dims['box_height'], new_h - 40)
+            center_x, center_y = new_w // 2, new_h // 2
+            box_x1 = max(0, center_x - box_width // 2)
+            box_y1 = max(0, center_y - box_height // 2)
+            box_x2 = min(new_w, center_x + box_width // 2)
+            box_y2 = min(new_h, center_y + box_height // 2)
+            
+            # Extract ROI and detect license
+            orig_box_x1, orig_box_y1 = int(box_x1 / scale), int(box_y1 / scale)
+            orig_box_x2, orig_box_y2 = int(box_x2 / scale), int(box_y2 / scale)
+            roi = frame[orig_box_y1:orig_box_y2, orig_box_x1:orig_box_x2]
+            
+            # License detection every 10 frames
+            frame_count += 1
+            if frame_count % 10 == 0 and roi.size > 0:
+                try:
+                    gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                    thresh_roi = cv2.threshold(gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+                    quick_text = pytesseract.image_to_string(thresh_roi, config='--psm 6 --oem 3').upper()
                     
-            except Exception:
-                consecutive_detections = 0
+                    matched_keywords = sum(1 for kw in VERIFICATION_KEYWORDS if kw in quick_text)
+                    consecutive_detections = consecutive_detections + 1 if matched_keywords >= 2 else 0
+                        
+                except Exception:
+                    consecutive_detections = 0
+            
+            # Draw UI
+            box_color = (0, 255, 0) if consecutive_detections > 0 else (0, 0, 255)
+            cv2.rectangle(display_frame, (box_x1, box_y1), (box_x2, box_y2), box_color, 3)
+            
+            # Status text
+            font_scale, font_thickness = 0.5, 1
+            
+            # Camera status
+            cv2.putText(display_frame, "RPi Camera 3 Ready", 
+                       (10, 25), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0), font_thickness)
+            
+            if reference_name:
+                cv2.putText(display_frame, f"Target: {reference_name}", (10, 50), 
+                           cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thickness)
+            
+            status_text = f"Detecting... {consecutive_detections}/{detection_threshold}" if consecutive_detections > 0 else "Position license in detection box"
+            cv2.putText(display_frame, status_text, (10, 75), 
+                       cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0) if consecutive_detections > 0 else (255, 255, 255), font_thickness)
+            
+            cv2.putText(display_frame, "Press 'q' to quit, 's' to capture", (10, new_h-10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (200, 200, 200), 1)
+            
+            cv2.imshow("MotorPass - License Capture", display_frame)
+            
+            # Auto capture or manual controls
+            if consecutive_detections >= detection_threshold:
+                print("✅ License detected! Auto-capturing...")
+                captured_frame = frame.copy()  # Just store the frame, don't save
+                break
+            
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
+                print("❌ Capture cancelled by user")
+                break
+            elif key == ord("s"):
+                print("📸 Manual capture triggered")
+                captured_frame = frame.copy()  # Just store the frame, don't save
+                break
         
-        # Draw UI
-        box_color = (0, 255, 0) if consecutive_detections > 0 else (0, 0, 255)
-        connection_color = (0, 255, 0) if webcam.connection_stable else (0, 0, 255)
+        cv2.destroyAllWindows()
         
-        cv2.rectangle(display_frame, (box_x1, box_y1), (box_x2, box_y2), box_color, 3)
-        
-        # Status text
-        font_scale, font_thickness = 0.5, 1
-        cv2.putText(display_frame, "Connected" if webcam.connection_stable else "Connection Issues", 
-                   (10, 25), cv2.FONT_HERSHEY_SIMPLEX, font_scale, connection_color, font_thickness)
-        
-        if reference_name:
-            cv2.putText(display_frame, f"Target: {reference_name}", (10, 50), 
-                       cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thickness)
-        
-        status_text = f"Detecting... {consecutive_detections}/{detection_threshold}" if consecutive_detections > 0 else "Position license in green box"
-        cv2.putText(display_frame, status_text, (10, 75), 
-                   cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0) if consecutive_detections > 0 else (255, 255, 255), font_thickness)
-        
-        cv2.putText(display_frame, "Press 'q' to quit, 's' to capture", (10, new_h-10), 
-                   cv2.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (200, 200, 200), 1)
-        
-        cv2.imshow("MotorPass - License Capture", display_frame)
-        
-        # Auto capture or manual controls
-        if consecutive_detections >= detection_threshold:
-            cv2.imwrite(output_path, frame)
-            break
-        
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord("q"):
-            break
-        elif key == ord("s"):
-            cv2.imwrite(output_path, frame)
-            break
+        # Create a temporary file for OCR processing only
+        if captured_frame is not None:
+            # Save temporarily just for OCR, then delete immediately
+            cv2.imwrite(temp_filename, captured_frame)
+            print(f"✅ License captured (temp processing file: {temp_filename})")
+            return temp_filename  # Return the temp filename for OCR processing
+        else:
+            return None
+            
+    except Exception as e:
+        print(f"❌ Error during license capture: {e}")
+        cv2.destroyAllWindows()
+        return None
+
+def cleanup_temp_file(temp_filename):
+    """Delete temporary file after OCR processing"""
+    try:
+        if temp_filename and os.path.exists(temp_filename):
+            os.remove(temp_filename)
+            print(f"🗑️ Temporary file cleaned up: {temp_filename}")
+    except Exception as e:
+        print(f"⚠️ Could not delete temp file: {e}")
     
-    cv2.destroyAllWindows()
-    return output_path if (consecutive_detections >= detection_threshold or key == ord("s")) else None
 
 # ============== MAIN LICENSE READING FUNCTIONS ==============
 
@@ -355,7 +370,9 @@ def licenseRead(image_path: str, fingerprint_info: dict):
         print(f"Match Confidence  : {structured_data['Match Confidence']}")
     print(f"Overall Status    : {overall_status}")
     print("==========================================\n")
-
+    
+    cleanup_temp_file(image_path)
+    
     return packaged
     
 def licenseReadGuest(image_path: str, guest_info: dict):
@@ -417,5 +434,7 @@ def licenseReadGuest(image_path: str, guest_info: dict):
     print(f"Indicators Found  : {indicator_matches}")
     print(f"Overall Status    : {overall_status}")
     print("===============================================\n")
-
+    
+    cleanup_temp_file(image_path)
+    
     return packaged
