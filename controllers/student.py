@@ -1,4 +1,4 @@
-# controllers/student.py - Updated for RPi Camera 3
+# controllers/student.py - Updated for RPi Camera 3 with License Expiration Check
 
 from services.fingerprint import authenticate_fingerprint
 from services.license_reader import *
@@ -10,6 +10,7 @@ from utils.display_helpers import display_separator, display_verification_result
 from utils.gui_helpers import show_results_gui
 
 import time
+from datetime import datetime
 
 def student_verification():
     """Main student verification workflow with integrated time tracking and LED status"""
@@ -38,7 +39,14 @@ def student_verification():
     # Display authentication success
     print(f"✅ Welcome: {student_info['name']} (ID: {student_info['student_id']})")
     
-    # Step 3: Check current time status
+    # Step 3: License expiration check
+    if not check_license_expiration(student_info):
+        print("❌ License expired or invalid. Access denied.")
+        set_led_idle()  # Return to idle on failure
+        input("\n📱 Press Enter to return to main menu...")
+        return
+    
+    # Step 4: Check current time status
     current_status = get_student_time_status(student_info['student_id'])
     print(f"📊 Current Status: {current_status}")
     
@@ -46,7 +54,7 @@ def student_verification():
         # Student is timing IN - full verification required
         print("\n🟢 TIMING IN - Full verification required")
         
-        # Step 4: License verification for TIME IN
+        # Step 5: License verification for TIME IN
         print("📄 Starting license verification...")
         image_path = auto_capture_license_rpi(reference_name=student_info['name'], 
                                            fingerprint_info=student_info)
@@ -67,12 +75,13 @@ def student_verification():
         verification_checks = {
             '🪖 Helmet': (True, 'VERIFIED'),
             '🔒 Fingerprint': (student_info['confidence'] > 50, f"VERIFIED ({student_info['confidence']}%)"),
+            '📅 License Expiration': (True, 'VALID'),  # Already checked above
             '🆔 License Detection': ("Driver's License Detected" in result.document_verified, 'VERIFIED' if "Driver's License Detected" in result.document_verified else 'FAILED'),
             '👤 Name Matching': (sim_score > 0.5 if sim_score else False, f"VERIFIED ({sim_score * 100:.1f}%)" if sim_score and sim_score > 0.5 else 'FAILED')
         }
         
         all_verified = all(status for status, _ in verification_checks.values())
-        partial_verified = verification_checks['🪖 Helmet'][0] and verification_checks['🔒 Fingerprint'][0] and verification_checks['🆔 License Detection'][0]
+        partial_verified = verification_checks['🪖 Helmet'][0] and verification_checks['🔒 Fingerprint'][0] and verification_checks['🆔 License Detection'][0] and verification_checks['📅 License Expiration'][0]
         
         if all_verified:
             overall_status = "✅ TIME IN SUCCESSFUL"
@@ -107,6 +116,7 @@ TIME IN Verification Complete!
 🆔 Student ID: {student_info['student_id']}
 📚 Course: {student_info['course']}
 🪪 License: {student_info['license_number']}
+📅 License Exp: {student_info['license_expiration']}
 
 {time_message}
 Status: {overall_status}
@@ -119,7 +129,8 @@ Status: {overall_status}
         
         verification_checks = {
             '🪖 Helmet': (True, 'VERIFIED'),
-            '🔒 Fingerprint': (student_info['confidence'] > 50, f"VERIFIED ({student_info['confidence']}%)")
+            '🔒 Fingerprint': (student_info['confidence'] > 50, f"VERIFIED ({student_info['confidence']}%)"),
+            '📅 License Expiration': (True, 'VALID')  # Already checked above
         }
         
         # Record time out
@@ -143,6 +154,7 @@ TIME OUT Complete!
 👤 Student: {student_info['name']}
 🆔 Student ID: {student_info['student_id']}
 📚 Course: {student_info['course']}
+📅 License Exp: {student_info['license_expiration']}
 
 {time_message}
 Status: {overall_status}
@@ -160,6 +172,54 @@ Status: {overall_status}
     input("\n📱 Press Enter to return to main menu...")
     
     # Note: LED will either be in success state (auto-returning to idle) or already in idle state
+
+def check_license_expiration(student_info):
+    """Check if student's license is expired"""
+    try:
+        # Get the expiration date from student info
+        expiration_date_str = student_info.get('license_expiration', '')
+        
+        if not expiration_date_str or expiration_date_str == 'N/A':
+            print("⚠️ No license expiration date found")
+            return False
+        
+        # Parse the expiration date (assuming format: YYYY-MM-DD)
+        try:
+            expiration_date = datetime.strptime(expiration_date_str, '%Y-%m-%d')
+        except ValueError:
+            # Try different date formats if needed
+            try:
+                expiration_date = datetime.strptime(expiration_date_str, '%m/%d/%Y')
+            except ValueError:
+                try:
+                    expiration_date = datetime.strptime(expiration_date_str, '%d/%m/%Y')
+                except ValueError:
+                    print(f"❌ Invalid license expiration date format: {expiration_date_str}")
+                    return False
+        
+        # Get current date
+        current_date = datetime.now()
+        
+        # Check if license is expired
+        if expiration_date.date() < current_date.date():
+            print(f"❌ License EXPIRED!")
+            print(f"📅 Expiration Date: {expiration_date.strftime('%Y-%m-%d')}")
+            print(f"📅 Current Date: {current_date.strftime('%Y-%m-%d')}")
+            return False
+        else:
+            days_until_expiry = (expiration_date.date() - current_date.date()).days
+            print(f"✅ License is VALID")
+            print(f"📅 Expires: {expiration_date.strftime('%Y-%m-%d')} ({days_until_expiry} days remaining)")
+            
+            # Optional: Warning for licenses expiring soon (within 30 days)
+            if days_until_expiry <= 30:
+                print(f"⚠️ WARNING: License expires in {days_until_expiry} days!")
+            
+            return True
+            
+    except Exception as e:
+        print(f"❌ Error checking license expiration: {e}")
+        return False
     
 # =================== VERIFICATION FUNCTIONS ===================
 

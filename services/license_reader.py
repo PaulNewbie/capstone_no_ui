@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 # services/license_reader.py - Philippine Driver's License OCR System - Updated for RPi Camera 3
+=======
+# services/license_reader.py - Cleaned License Reader
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
 
 import cv2
 import numpy as np
@@ -11,7 +15,7 @@ from services.rpi_camera import get_camera
 import os
 from datetime import datetime
 
-# ============== DATA STRUCTURES & CONFIGURATION ==============
+# ============== CONFIG & DATA STRUCTURES ==============
 
 VERIFICATION_KEYWORDS = [
     "REPUBLIC", "PHILIPPINES", "DEPARTMENT", "TRANSPORTATION", 
@@ -21,19 +25,67 @@ VERIFICATION_KEYWORDS = [
     "Expiration Date"
 ]
 
+<<<<<<< HEAD
 @dataclass
 class NameInfo:
     """Data structure for license verification results"""
+=======
+# Global temp file tracking
+_temp_files = []
+
+@dataclass
+class NameInfo:
+    """License verification results"""
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
     document_type: str
     name: str
     document_verified: str
     formatted_text: str
     fingerprint_info: dict = None
 
+<<<<<<< HEAD
 # ============== IMAGE PREPROCESSING FUNCTIONS ==============
+=======
+# ============== TEMP FILE MANAGEMENT ==============
+
+def register_temp_file(filepath):
+    """Register temp file for cleanup"""
+    global _temp_files
+    if filepath not in _temp_files:
+        _temp_files.append(filepath)
+
+def cleanup_all_temp_files():
+    """Clean up all temp files"""
+    global _temp_files
+    for filepath in _temp_files[:]:
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        except Exception as e:
+            print(f"⚠️ Could not delete {filepath}: {e}")
+        finally:
+            _temp_files.remove(filepath)
+
+def safe_delete_temp_file(temp_filename):
+    """Safely delete single temp file"""
+    try:
+        if temp_filename and os.path.exists(temp_filename):
+            os.remove(temp_filename)
+            print(f"🗑️ Temp file deleted: {os.path.basename(temp_filename)}")
+            global _temp_files
+            if temp_filename in _temp_files:
+                _temp_files.remove(temp_filename)
+    except Exception as e:
+        print(f"⚠️ Could not delete temp file: {e}")
+
+# Register cleanup on exit
+atexit.register(cleanup_all_temp_files)
+
+# ============== IMAGE PREPROCESSING ==============
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
 
 def preprocess_image(image_path: str) -> np.ndarray:
-    """Apply comprehensive image preprocessing for OCR optimization"""
+    """Apply comprehensive preprocessing for OCR"""
     img = cv2.imread(image_path)
     if img is None:
         raise Exception(f"Could not read image at {image_path}")
@@ -57,7 +109,7 @@ def enhance_image(image: np.ndarray) -> np.ndarray:
     return enhanced
 
 def preprocess_batch(image_path: str) -> List[np.ndarray]:
-    """Generate multiple preprocessed versions for better OCR accuracy"""
+    """Generate multiple preprocessed versions for better OCR"""
     img = cv2.imread(image_path)
     if img is None:
         raise Exception(f"Could not read image at {image_path}")
@@ -75,7 +127,7 @@ def preprocess_batch(image_path: str) -> List[np.ndarray]:
     thresh2 = cv2.threshold(equalized, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
     processed_images.append(thresh2)
     
-    # Adaptive thresholding with bilateral filter
+    # Adaptive thresholding
     bilateral = cv2.bilateralFilter(gray, 11, 17, 17)
     adaptive_thresh = cv2.adaptiveThreshold(bilateral, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                             cv2.THRESH_BINARY, 11, 2)
@@ -83,10 +135,10 @@ def preprocess_batch(image_path: str) -> List[np.ndarray]:
     
     return processed_images
 
-# ============== OCR TEXT EXTRACTION ==============
+# ============== OCR FUNCTIONS ==============
 
 def extract_text_from_image(image_path: str, config: str = '--psm 11 --oem 3') -> str:
-    """Extract text from license image using optimized OCR"""
+    """Extract text using optimized OCR"""
     try:
         img = preprocess_image(image_path)
         enhanced = enhance_image(img)
@@ -95,7 +147,7 @@ def extract_text_from_image(image_path: str, config: str = '--psm 11 --oem 3') -
         return f"Error extracting text: {str(e)}"
 
 def find_best_line_match(input_name: str, ocr_text: List[str]) -> tuple:
-    """Find the best matching line in OCR text for the given name"""
+    """Find best matching line in OCR text"""
     best_match, best_score = None, 0.0
 
     for line in ocr_text:
@@ -108,7 +160,7 @@ def find_best_line_match(input_name: str, ocr_text: List[str]) -> tuple:
     return best_match, best_score
 
 def format_text_output(raw_text: str) -> str:
-    """Clean and format extracted text for display"""
+    """Clean and format extracted text"""
     lines = raw_text.splitlines()
     cleaned = []
     for line in lines:
@@ -118,13 +170,13 @@ def format_text_output(raw_text: str) -> str:
             cleaned.append(sanitized)
     return "\n".join(cleaned)
 
-# =========== LICENSE VERIFICATION & NAME EXTRACTION ==========
+# ============== NAME EXTRACTION ==============
 
 def extract_name_from_lines(image_path: str, reference_name: str = "", 
                            best_ocr_match: str = "", match_score: float = 0.0) -> Dict[str, str]:
-    """Extract and verify name from license using multiple methods"""
+    """Extract and verify name from license"""
     
-    # Process image with multiple preprocessing methods
+    # Process image with multiple methods
     preprocessed_images = preprocess_batch(image_path)
     best_text = ""
     max_length = 0
@@ -149,7 +201,7 @@ def extract_name_from_lines(image_path: str, reference_name: str = "",
     if reference_name and match_score >= 0.6:
         name_info.update({
             "Name": reference_name,
-            "Matched From": "Fingerprint Authentication (High Confidence Match)",
+            "Matched From": "Fingerprint Authentication (High Confidence)",
             "Match Confidence": f"{match_score * 100:.1f}%",
             "Document Verified": doc_status
         })
@@ -200,24 +252,41 @@ def package_name_info(structured_data: Dict[str, str], basic_text: str,
         fingerprint_info=fingerprint_info
     )
 
-# ============== RPi CAMERA 3 LICENSE CAPTURE ==============
+# ============== RPi CAMERA CAPTURE ==============
 
 def auto_capture_license_rpi(reference_name="", fingerprint_info=None):
+<<<<<<< HEAD
     """Auto-capture license using RPi Camera 3 with real-time detection - NO FILE SAVING"""
+=======
+    """Auto-capture license using RPi Camera 3 with brightness enhancement"""
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
     
-    # Get camera instance
     camera = get_camera()
     if not camera.initialized:
         print("❌ RPi Camera not initialized")
         return None
     
+<<<<<<< HEAD
     # Create a temporary filename for processing (but won't actually save)
+=======
+    # Create temp file
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     if fingerprint_info and 'student_id' in fingerprint_info:
         temp_filename = f"temp_license_{fingerprint_info['student_id']}_{timestamp}.jpg"
     else:
+<<<<<<< HEAD
         temp_filename = f"temp_license_{timestamp}.jpg"
+=======
+        temp_prefix = f"motorpass_license_{timestamp}"
+    
+    temp_file = tempfile.NamedTemporaryFile(suffix='.jpg', prefix=temp_prefix, delete=False)
+    temp_filename = temp_file.name
+    temp_file.close()
+    
+    register_temp_file(temp_filename)
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
     
     print("📷 Using Raspberry Pi Camera 3")
     print(f"📱 Target: {reference_name}" if reference_name else "📱 Guest License Capture")
@@ -234,21 +303,38 @@ def auto_capture_license_rpi(reference_name="", fingerprint_info=None):
     
     print("🔍 License detection started...")
     print("📱 Press 'q' to quit, 's' to manually capture")
+<<<<<<< HEAD
+=======
+    print("🪞 MIRROR MODE: Display is mirrored for easy alignment")
+    print("💡 BRIGHT MODE: Enhanced lighting for better visibility")
+    print("📋 Keep fingers away from detection box")
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
     
     try:
         while True:
             frame = camera.get_frame()
             if frame is None:
-                print("❌ Failed to get frame from camera")
+                print("❌ Failed to get frame")
                 break
             
+<<<<<<< HEAD
             # Scale frame for display
             original_h, original_w = frame.shape[:2]
+=======
+            # Brightness enhancement
+            brightened_frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=20)
+            
+            # Mirror display for better UX
+            mirrored_frame = cv2.flip(brightened_frame, 1)
+            
+            # Scale for display
+            original_h, original_w = mirrored_frame.shape[:2]
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
             scale = min(screen_dims['width'] / original_w, screen_dims['height'] / original_h)
             new_w, new_h = int(original_w * scale), int(original_h * scale)
             display_frame = cv2.resize(frame, (new_w, new_h))
             
-            # Define detection box
+            # Detection box
             box_width = min(screen_dims['box_width'], new_w - 40)
             box_height = min(screen_dims['box_height'], new_h - 40)
             center_x, center_y = new_w // 2, new_h // 2
@@ -257,7 +343,11 @@ def auto_capture_license_rpi(reference_name="", fingerprint_info=None):
             box_x2 = min(new_w, center_x + box_width // 2)
             box_y2 = min(new_h, center_y + box_height // 2)
             
+<<<<<<< HEAD
             # Extract ROI and detect license
+=======
+            # Extract ROI from brightened frame
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
             orig_box_x1, orig_box_y1 = int(box_x1 / scale), int(box_y1 / scale)
             orig_box_x2, orig_box_y2 = int(box_x2 / scale), int(box_y2 / scale)
             roi = frame[orig_box_y1:orig_box_y2, orig_box_x1:orig_box_x2]
@@ -280,11 +370,14 @@ def auto_capture_license_rpi(reference_name="", fingerprint_info=None):
             box_color = (0, 255, 0) if consecutive_detections > 0 else (0, 0, 255)
             cv2.rectangle(display_frame, (box_x1, box_y1), (box_x2, box_y2), box_color, 3)
             
-            # Status text
             font_scale, font_thickness = 0.5, 1
             
+<<<<<<< HEAD
             # Camera status
             cv2.putText(display_frame, "RPi Camera 3 Ready", 
+=======
+            cv2.putText(display_frame, "RPi Camera 3 Ready (Mirror + Bright Mode)", 
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
                        (10, 25), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0), font_thickness)
             
             if reference_name:
@@ -295,6 +388,12 @@ def auto_capture_license_rpi(reference_name="", fingerprint_info=None):
             cv2.putText(display_frame, status_text, (10, 75), 
                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0) if consecutive_detections > 0 else (255, 255, 255), font_thickness)
             
+<<<<<<< HEAD
+=======
+            cv2.putText(display_frame, "Keep fingers OUTSIDE the detection box!", (10, 100), 
+                       cv2.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (0, 255, 255), 2)
+            
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
             cv2.putText(display_frame, "Press 'q' to quit, 's' to capture", (10, new_h-10), 
                        cv2.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (200, 200, 200), 1)
             
@@ -308,27 +407,41 @@ def auto_capture_license_rpi(reference_name="", fingerprint_info=None):
             
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
-                print("❌ Capture cancelled by user")
+                print("❌ Capture cancelled")
                 break
             elif key == ord("s"):
+<<<<<<< HEAD
                 print("📸 Manual capture triggered")
                 captured_frame = frame.copy()  # Just store the frame, don't save
+=======
+                print("📸 Manual capture")
+                captured_frame = brightened_frame.copy()
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
                 break
         
         cv2.destroyAllWindows()
         
+<<<<<<< HEAD
         # Create a temporary file for OCR processing only
+=======
+        # Save captured frame
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
         if captured_frame is not None:
             # Save temporarily just for OCR, then delete immediately
             cv2.imwrite(temp_filename, captured_frame)
             print(f"✅ License captured (temp processing file: {temp_filename})")
             return temp_filename  # Return the temp filename for OCR processing
         else:
+<<<<<<< HEAD
+=======
+            safe_delete_temp_file(temp_filename)
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
             return None
             
     except Exception as e:
-        print(f"❌ Error during license capture: {e}")
+        print(f"❌ Error during capture: {e}")
         cv2.destroyAllWindows()
+<<<<<<< HEAD
         return None
 
 def cleanup_temp_file(temp_filename):
@@ -341,6 +454,11 @@ def cleanup_temp_file(temp_filename):
         print(f"⚠️ Could not delete temp file: {e}")
     
 
+=======
+        safe_delete_temp_file(temp_filename)
+        return None
+
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
 # ============== MAIN LICENSE READING FUNCTIONS ==============
 
 def licenseRead(image_path: str, fingerprint_info: dict):
@@ -356,6 +474,7 @@ def licenseRead(image_path: str, fingerprint_info: dict):
 
     packaged = package_name_info(structured_data, basic_text, fingerprint_info)
 
+<<<<<<< HEAD
     # Verification summary
     auth_success = fingerprint_info['confidence'] > 50
     license_match = sim_score > 0.5 if sim_score else False
@@ -438,3 +557,86 @@ def licenseReadGuest(image_path: str, guest_info: dict):
     cleanup_temp_file(image_path)
     
     return packaged
+=======
+        # Verification summary
+        auth_success = fingerprint_info['confidence'] > 50
+        license_match = sim_score > 0.5 if sim_score else False
+        overall_status = "VERIFIED" if auth_success and license_match else "PARTIAL VERIFICATION"
+        
+        print(f"\n===== MOTORPASS VERIFICATION SUMMARY =====")
+        print(f"Fingerprint Auth  : {fingerprint_info['name']} (ID: {fingerprint_info['finger_id']})")
+        print(f"Document Type     : {packaged.document_type}")
+        print(f"Detected Name     : {packaged.name}")
+        print(f"Verification      : {packaged.document_verified}")
+        if "Match Confidence" in structured_data:
+            print(f"Match Confidence  : {structured_data['Match Confidence']}")
+        print(f"Overall Status    : {overall_status}")
+        print("==========================================\n")
+        
+        return packaged
+        
+    finally:
+        safe_delete_temp_file(image_path)
+    
+def licenseReadGuest(image_path: str, guest_info: dict):
+    """Process license for guest verification - WITH AUTO CLEANUP"""
+    guest_name = guest_info['name']
+
+    try:
+        basic_text = extract_text_from_image(image_path)
+        full_text = " ".join(basic_text.splitlines()).upper()
+        
+        # More flexible document verification for guests
+        matched_keywords = {kw for kw in VERIFICATION_KEYWORDS if kw in full_text}
+        
+        license_indicators = [
+            "LICENSE", "DRIVER", "REPUBLIC", "PHILIPPINES", 
+            "TRANSPORTATION", "EXPIRATION", "DATE OF BIRTH"
+        ]
+        
+        indicator_matches = sum(1 for indicator in license_indicators if indicator in full_text)
+        
+        # Lenient verification: either 1 verification keyword OR 2 license indicators
+        is_verified = len(matched_keywords) >= 1 or indicator_matches >= 2
+        
+        # Additional patterns
+        has_date_pattern = bool(re.search(r'\d{2}[-/]\d{2}[-/]\d{4}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}', full_text))
+        has_license_number = bool(re.search(r'[A-Z]\d{2}-\d{2}-\d{6}|[A-Z]\d{8}|\d{10}', full_text))
+        
+        if not is_verified:
+            is_verified = has_date_pattern or has_license_number
+        
+        structured_data = {
+            "Name": guest_name,
+            "Document Verified": "Driver's License Detected" if is_verified else "Document Detected",
+            "Matched From": "Guest Information Provided",
+            "Keywords Found": len(matched_keywords),
+            "Indicators Found": indicator_matches
+        }
+        
+        packaged = NameInfo(
+            document_type="Driver's License",
+            name=guest_name,
+            document_verified=structured_data["Document Verified"],
+            formatted_text=format_text_output(basic_text),
+            fingerprint_info=None
+        )
+
+        overall_status = "VERIFIED" if is_verified else "DOCUMENT DETECTED"
+        
+        print(f"\n===== MOTORPASS GUEST VERIFICATION SUMMARY =====")
+        print(f"Guest Name        : {guest_name}")
+        print(f"Plate Number      : {guest_info['plate_number']}")
+        print(f"Visiting          : {guest_info['office']}")
+        print(f"Document Type     : {packaged.document_type}")
+        print(f"Verification      : {packaged.document_verified}")
+        print(f"Keywords Found    : {len(matched_keywords)}")
+        print(f"Indicators Found  : {indicator_matches}")
+        print(f"Overall Status    : {overall_status}")
+        print("===============================================\n")
+        
+        return packaged
+        
+    finally:
+        safe_delete_temp_file(image_path)
+>>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
