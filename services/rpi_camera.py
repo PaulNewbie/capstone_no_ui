@@ -1,4 +1,4 @@
-# services/rpi_camera.py - Clean camera service with minimal logging
+# services/rpi_camera.py 
 
 import cv2
 import numpy as np
@@ -12,6 +12,23 @@ try:
     RPI_CAMERA_AVAILABLE = True
 except ImportError:
     RPI_CAMERA_AVAILABLE = False
+    
+# Global camera instance - singleton pattern
+_camera_instance = None
+
+def get_camera():
+    """Get global camera instance (singleton)"""
+    global _camera_instance
+    if _camera_instance is None:
+        _camera_instance = RPiCameraService()
+    return _camera_instance
+
+def release_camera():
+    """Release global camera instance"""
+    global _camera_instance
+    if _camera_instance:
+        _camera_instance.release()
+        _camera_instance = None
 
 class RPiCameraService:
 	
@@ -136,19 +153,4 @@ class RPiCameraService:
         """Destructor to ensure camera is released"""
         self.release()
 
-# Global camera instance - singleton pattern
-_camera_instance = None
 
-def get_camera():
-    """Get global camera instance (singleton)"""
-    global _camera_instance
-    if _camera_instance is None:
-        _camera_instance = RPiCameraService()
-    return _camera_instance
-
-def release_camera():
-    """Release global camera instance"""
-    global _camera_instance
-    if _camera_instance:
-        _camera_instance.release()
-        _camera_instance = None

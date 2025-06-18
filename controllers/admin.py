@@ -1,20 +1,29 @@
-<<<<<<< HEAD
-# controllers/admin.py
-=======
-# controllers/admin.py - Cleaned Admin Controller
->>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
+# controllers/admin.py 
 
 from config import ADMIN_MENU
 from services.fingerprint import *
 from services.time_tracker import *
-from database.db_operations import *
-from utils.display_helpers import display_menu, get_user_input, confirm_action, display_separator, get_num
+
+from database.db_operations import (
+    get_all_time_records,
+    clear_all_time_records,
+    get_students_currently_in,
+    get_database_stats,
+    backup_databases
+)
+
+from utils.display_helpers import (
+	display_menu, 
+	get_user_input, 
+	confirm_action, 
+	display_separator, 
+	get_num 
+)
+
 import time
 import json
 import os
 
-<<<<<<< HEAD
-=======
 # =================== ADMIN DATABASE FUNCTIONS ===================
 
 def load_admin_database():
@@ -151,8 +160,6 @@ def authenticate_admin():
         return False
 
 # =================== ADMIN FUNCTIONS ===================
-
->>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
 def admin_enroll():
     """Enroll new student"""
     if finger.read_templates() != adafruit_fingerprint.OK:
@@ -160,17 +167,13 @@ def admin_enroll():
         return
     
     print(f"📊 Current enrollments: {finger.template_count}")
-<<<<<<< HEAD
-    location = get_num(finger.library_size)
-=======
-    
+
     # Get slot (skip admin slot 1)
     location = get_num(finger.library_size)
     if location == 1:
         print("❌ Slot #1 reserved for admin. Use slot 2+")
         return
     
->>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
     success = enroll_finger_with_student_info(location)
     print(f"{'✅ Success!' if success else '❌ Failed.'}")
 
@@ -184,37 +187,28 @@ def admin_view_enrolled():
     print("\n👥 ENROLLED STUDENTS:")
     display_separator()
     
+    student_count = 0  # Initialize student_count
+    
     for finger_id, info in database.items():
-<<<<<<< HEAD
-        student_data = [
-            f"🆔 Slot: {finger_id}",
-            f"👤 Name: {info['name']}",
-            f"🎓 Student ID: {info.get('student_id', 'N/A')}",
-            f"📚 Course: {info.get('course', 'N/A')}",
-            f"🪪 License: {info.get('license_number', 'N/A')}",
-            f"📅 License Exp: {info.get('license_expiration', 'N/A')}",
-            f"🕒 Enrolled: {info.get('enrolled_date', 'Unknown')}"
-        ]
-        for line in student_data:
-            print(line)
-        print("-" * 50)
-=======
-        if finger_id == "1":  # Skip admin
+        # Skip admin slot
+        if finger_id == "1":
             continue
             
         student_count += 1
+        
         print(f"🆔 Slot: {finger_id}")
         print(f"👤 Name: {info['name']}")
-        print(f"🎓 ID: {info.get('student_id', 'N/A')}")
+        print(f"🎓 Student ID: {info.get('student_id', 'N/A')}")
         print(f"📚 Course: {info.get('course', 'N/A')}")
         print(f"🪪 License: {info.get('license_number', 'N/A')}")
-        print(f"📅 Exp: {info.get('license_expiration', 'N/A')}")
+        print(f"📅 License Exp: {info.get('license_expiration', 'N/A')}")
         print(f"🕒 Enrolled: {info.get('enrolled_date', 'Unknown')}")
         print("-" * 50)
     
     if student_count == 0:
         print("📁 No students enrolled.")
->>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
+    else:
+        print(f"\n📊 Total Students: {student_count}")
 
 def admin_delete_fingerprint():
     """Delete student fingerprint"""
@@ -226,16 +220,13 @@ def admin_delete_fingerprint():
     admin_view_enrolled()
     
     try:
-<<<<<<< HEAD
         finger_id = get_user_input("Enter Fingerprint Slot ID to delete")
-=======
         finger_id = get_user_input("Enter Slot ID to delete")
         
         if finger_id == "1":
             print("❌ Cannot delete admin slot. Use 'Change Admin' option.")
             return
             
->>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
         if finger_id not in database:
             print("❌ Slot not found.")
             return
@@ -267,13 +258,12 @@ def admin_reset_all():
         return
     
     try:
-<<<<<<< HEAD
         if finger.empty_library() == adafruit_fingerprint.OK:
             save_fingerprint_database({})
             print("✅ All student fingerprint data has been reset.")
         else:
             print("❌ Failed to clear sensor database.")
-=======
+
         database = load_fingerprint_database()
         
         # Delete all student fingerprints (preserve admin)
@@ -284,7 +274,6 @@ def admin_reset_all():
         save_fingerprint_database({})
         print("✅ All student data reset. Admin preserved.")
         
->>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
     except Exception as e:
         print(f"❌ Reset error: {e}")
 
@@ -362,10 +351,7 @@ def admin_clear_time_records():
     else:
         print("❌ Failed to clear records.")
 
-<<<<<<< HEAD
-def admin_panel():
-    """Main admin panel controller"""
-=======
+
 def admin_change_fingerprint():
     """Change admin fingerprint (hidden option)"""
     print("\n🔄 CHANGE ADMIN FINGERPRINT")
@@ -411,7 +397,6 @@ def admin_panel():
     print("✅ Welcome to admin panel!")
     
     # Admin panel loop
->>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
     while True:
         display_menu(ADMIN_MENU)
         choice = get_user_input("Select option")
@@ -423,12 +408,8 @@ def admin_panel():
             "4": admin_reset_all,
             "5": admin_sync_database,
             "6": admin_view_time_records,
-<<<<<<< HEAD
-            "7": admin_clear_time_records
-=======
             "7": admin_clear_time_records,
             "0": admin_change_fingerprint  # Hidden option
->>>>>>> 0d61baa (major fix with license and fingerprint changes verification)
         }
         
         if choice in actions:
@@ -436,8 +417,5 @@ def admin_panel():
         elif choice == "8":
             break
         else:
-<<<<<<< HEAD
             print("❌ Invalid option. Please try again.")
-=======
             print("❌ Invalid option.")
->>>>>>> 0d61baa (major fix with license and fingerprint changes verification)

@@ -1,10 +1,16 @@
-# controllers/student.py - Updated for RPi Camera 3 with License Expiration Check
+# controllers/student.py - Simplified with Clean Logging
 
 from services.fingerprint import authenticate_fingerprint
 from services.license_reader import *
 from services.helmet_infer import verify_helmet
-from services.time_tracker import *
-from services.led_control import set_led_processing, set_led_success, set_led_idle
+from services.led_control import *
+
+# Import database operations
+from database.db_operations import (
+    get_student_time_status,
+    record_time_in,
+    record_time_out
+)
 
 from utils.display_helpers import display_separator, display_verification_result
 from utils.gui_helpers import show_results_gui
@@ -20,9 +26,10 @@ def student_verification():
     set_led_processing()
     
     # Step 1: Helmet verification (always required)
+    print("🪖 Checking helmet...")
     if not verify_helmet_check():
-        print("❌ Helmet verification failed - returning to idle state")
-        set_led_idle()  # Return to idle on failure
+        print("❌ Helmet verification failed")
+        set_led_idle()
         input("\n📱 Press Enter to return to main menu...")
         return
     
@@ -31,202 +38,167 @@ def student_verification():
     student_info = authenticate_fingerprint()
     
     if not student_info:
-        print("❌ Authentication failed. Access denied.")
-        set_led_idle()  # Return to idle on failure
+        print("❌ Authentication failed")
+        set_led_idle()
         input("\n📱 Press Enter to return to main menu...")
         return
     
-    # Display authentication success
-    print(f"✅ Welcome: {student_info['name']} (ID: {student_info['student_id']})")
+    print(f"✅ {student_info['name']} (ID: {student_info['student_id']})")
     
-    # Step 3: License expiration check
-    if not check_license_expiration(student_info):
-        print("❌ License expired or invalid. Access denied.")
-        set_led_idle()  # Return to idle on failure
-        input("\n📱 Press Enter to return to main menu...")
-        return
-    
-    # Step 4: Check current time status
+    # Step 3: Check current time status first
     current_status = get_student_time_status(student_info['student_id'])
-    print(f"📊 Current Status: {current_status}")
+    
+    # Step 4: License expiration check (only for TIME IN)
+    if current_status == 'OUT' or current_status is None:
+        license_expiration_valid = check_license_expiration(student_info)
+        if not license_expiration_valid:
+            print("❌ License expired")
+            set_led_idle()
+            input("\n📱 Press Enter to return to main menu...")
+            return
     
     if current_status == 'OUT' or current_status is None:
         # Student is timing IN - full verification required
-        print("\n🟢 TIMING IN - Full verification required")
+        print("🟢 TIMING IN - Starting license verification...")
         
-        # Step 5: License verification for TIME IN
-        print("📄 Starting license verification...")
+        # Capture and verify license
         image_path = auto_capture_license_rpi(reference_name=student_info['name'], 
                                            fingerprint_info=student_info)
         
         if not image_path:
-            print("❌ License capture failed or cancelled.")
-            set_led_idle()  # Return to idle on failure
+            print("❌ License capture failed")
+            set_led_idle()
             input("\n📱 Press Enter to return to main menu...")
             return
         
-        # Process license
-        ocr_preview = extract_text_from_image(image_path)
-        ocr_lines = [line.strip() for line in ocr_preview.splitlines() if line.strip()]
-        name_from_ocr, sim_score = find_best_line_match(student_info['name'], ocr_lines)
-        result = licenseRead(image_path, student_info)
+        is_fully_verified = complete_verification_flow(
+            image_path=image_path,
+            fingerprint_info=student_info,
+            helmet_verified=True,
+            license_expiration_valid=license_expiration_valid
+        )
         
-        # Prepare verification data
-        verification_checks = {
-            '🪖 Helmet': (True, 'VERIFIED'),
-            '🔒 Fingerprint': (student_info['confidence'] > 50, f"VERIFIED ({student_info['confidence']}%)"),
-            '📅 License Expiration': (True, 'VALID'),  # Already checked above
-            '🆔 License Detection': ("Driver's License Detected" in result.document_verified, 'VERIFIED' if "Driver's License Detected" in result.document_verified else 'FAILED'),
-            '👤 Name Matching': (sim_score > 0.5 if sim_score else False, f"VERIFIED ({sim_score * 100:.1f}%)" if sim_score and sim_score > 0.5 else 'FAILED')
-        }
-        
-        all_verified = all(status for status, _ in verification_checks.values())
-        partial_verified = verification_checks['🪖 Helmet'][0] and verification_checks['🔒 Fingerprint'][0] and verification_checks['🆔 License Detection'][0] and verification_checks['📅 License Expiration'][0]
-        
-        if all_verified:
-            overall_status = "✅ TIME IN SUCCESSFUL"
-            status_color = "🟢"
-            
-            # Record time in for successful verification
+        if is_fully_verified:
             if record_time_in(student_info):
-                time_message = f"🟢 TIME IN recorded at {time.strftime('%H:%M:%S')}"
-                # Set LED to success (green) for successful time in
-                set_led_success(duration=5.0)  # Green for 5 seconds, then auto-return to idle
+                print(f"✅ TIME IN SUCCESSFUL - {time.strftime('%H:%M:%S')}")
+                set_led_success(duration=5.0)
             else:
-                time_message = "❌ Failed to record TIME IN"
-                set_led_idle()  # Return to idle on database failure
-            
-            print(f"\n🕒 {time_message}")
-            
-        elif partial_verified:
-            overall_status = "⚠️ PARTIAL VERIFICATION - TIME IN DENIED"
-            status_color = "🟡"
-            time_message = "❌ Time IN denied due to incomplete verification"
-            set_led_idle()  # Return to idle on partial verification
+                print("❌ Failed to record TIME IN")
+                set_led_idle()
         else:
-            overall_status = "❌ VERIFICATION FAILED - TIME IN DENIED"
-            status_color = "🔴"
-            time_message = "❌ Time IN denied due to failed verification"
-            set_led_idle()  # Return to idle on failed verification
-        
-        gui_message = f"""
-TIME IN Verification Complete!
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-👤 Student: {student_info['name']}
-🆔 Student ID: {student_info['student_id']}
-📚 Course: {student_info['course']}
-🪪 License: {student_info['license_number']}
-📅 License Exp: {student_info['license_expiration']}
-
-{time_message}
-Status: {overall_status}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        """
+            print("❌ VERIFICATION INCOMPLETE - TIME IN DENIED")
+            set_led_idle()
         
     else:
         # Student is timing OUT - only helmet + fingerprint required
-        print("\n🔴 TIMING OUT - Helmet and fingerprint verification only")
+        print("🔴 TIMING OUT...")
+        print("🛡️ Drive safe!")
         
-        verification_checks = {
-            '🪖 Helmet': (True, 'VERIFIED'),
-            '🔒 Fingerprint': (student_info['confidence'] > 50, f"VERIFIED ({student_info['confidence']}%)"),
-            '📅 License Expiration': (True, 'VALID')  # Already checked above
-        }
-        
-        # Record time out
         if record_time_out(student_info):
-            overall_status = "✅ TIME OUT SUCCESSFUL"
-            status_color = "🟢"
-            time_message = f"🔴 TIME OUT recorded at {time.strftime('%H:%M:%S')}"
-            # Set LED to success (green) for successful time out
-            set_led_success(duration=5.0)  # Green for 5 seconds, then auto-return to idle
+            print(f"✅ TIME OUT SUCCESSFUL - {time.strftime('%H:%M:%S')}")
+            set_led_success(duration=5.0)
         else:
-            overall_status = "❌ TIME OUT FAILED"
-            status_color = "🔴"
-            time_message = "❌ Failed to record TIME OUT"
-            set_led_idle()  # Return to idle on failure
-        
-        print(f"\n🕒 {time_message}")
-        
-        gui_message = f"""
-TIME OUT Complete!
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-👤 Student: {student_info['name']}
-🆔 Student ID: {student_info['student_id']}
-📚 Course: {student_info['course']}
-📅 License Exp: {student_info['license_expiration']}
-
-{time_message}
-Status: {overall_status}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        """
+            print("❌ Failed to record TIME OUT")
+            set_led_idle()
     
-    verification_data = {
-        'checks': verification_checks,
-        'overall_status': overall_status,
-        'status_color': status_color,
-        'gui_message': gui_message
-    }
-    
-    display_verification_result(student_info, verification_data)
     input("\n📱 Press Enter to return to main menu...")
-    
-    # Note: LED will either be in success state (auto-returning to idle) or already in idle state
 
 def check_license_expiration(student_info):
-    """Check if student's license is expired"""
+    """Check if student's license is expired - simplified logging"""
     try:
-        # Get the expiration date from student info
         expiration_date_str = student_info.get('license_expiration', '')
         
         if not expiration_date_str or expiration_date_str == 'N/A':
-            print("⚠️ No license expiration date found")
             return False
         
-        # Parse the expiration date (assuming format: YYYY-MM-DD)
+        # Parse the expiration date (multiple formats)
         try:
             expiration_date = datetime.strptime(expiration_date_str, '%Y-%m-%d')
         except ValueError:
-            # Try different date formats if needed
             try:
                 expiration_date = datetime.strptime(expiration_date_str, '%m/%d/%Y')
             except ValueError:
                 try:
                     expiration_date = datetime.strptime(expiration_date_str, '%d/%m/%Y')
                 except ValueError:
-                    print(f"❌ Invalid license expiration date format: {expiration_date_str}")
+                    print(f"❌ Invalid date format: {expiration_date_str}")
                     return False
         
-        # Get current date
         current_date = datetime.now()
         
-        # Check if license is expired
         if expiration_date.date() < current_date.date():
-            print(f"❌ License EXPIRED!")
-            print(f"📅 Expiration Date: {expiration_date.strftime('%Y-%m-%d')}")
-            print(f"📅 Current Date: {current_date.strftime('%Y-%m-%d')}")
+            print(f"❌ License EXPIRED: {expiration_date.strftime('%Y-%m-%d')}")
             return False
         else:
             days_until_expiry = (expiration_date.date() - current_date.date()).days
-            print(f"✅ License is VALID")
-            print(f"📅 Expires: {expiration_date.strftime('%Y-%m-%d')} ({days_until_expiry} days remaining)")
+            print(f"✅ License valid ({days_until_expiry} days remaining)")
             
-            # Optional: Warning for licenses expiring soon (within 30 days)
             if days_until_expiry <= 30:
-                print(f"⚠️ WARNING: License expires in {days_until_expiry} days!")
+                print(f"⚠️ Warning: License expires in {days_until_expiry} days")
             
             return True
             
     except Exception as e:
-        print(f"❌ Error checking license expiration: {e}")
+        print(f"❌ Error checking license: {e}")
         return False
-    
-# =================== VERIFICATION FUNCTIONS ===================
 
 def verify_helmet_check():
-    """Verify helmet is being worn"""
+    """Verify helmet is being worn - simplified"""
     if not verify_helmet():
-        print("❌ Helmet verification failed. You must wear a FULL-FACE helmet.")
         return False
-    print("✅ Helmet verification passed!")
+    print("✅ Helmet verified")
     return True
+
+# =================== GUEST VERIFICATION FUNCTION ===================
+
+def guest_verification():
+    """Guest verification workflow - simplified"""
+    print("\n🎫 GUEST VERIFICATION SYSTEM")
+    
+    set_led_processing()
+    
+    # Step 1: Helmet verification
+    print("🪖 Checking helmet...")
+    if not verify_helmet_check():
+        print("❌ Helmet verification failed")
+        set_led_idle()
+        input("\n📱 Press Enter to return to main menu...")
+        return
+    
+    # Step 2: Get guest information
+    guest_info = {
+        'name': input("👤 Enter guest name: ").strip(),
+        'plate_number': input("🚗 Enter vehicle plate number: ").strip(),
+        'office': input("🏢 Enter office/purpose: ").strip()
+    }
+    
+    if not all(guest_info.values()):
+        print("❌ All guest information is required")
+        set_led_idle()
+        input("\n📱 Press Enter to return to main menu...")
+        return
+    
+    # Step 3: License verification
+    print("📄 Starting license verification...")
+    image_path = auto_capture_license_rpi("Guest License")
+    
+    if not image_path:
+        print("❌ License capture failed")
+        set_led_idle()
+        input("\n📱 Press Enter to return to main menu...")
+        return
+    
+    is_guest_verified = complete_guest_verification_flow(
+        image_path=image_path,
+        guest_info=guest_info,
+        helmet_verified=True
+    )
+    
+    if is_guest_verified:
+        print("✅ GUEST ACCESS GRANTED")
+        set_led_success(duration=5.0)
+    else:
+        print("❌ GUEST ACCESS DENIED")
+        set_led_idle()
+    
+    input("\n📱 Press Enter to return to main menu...")

@@ -1,9 +1,12 @@
-# services/led_control.py - Clean LED control with minimal logging
+# services/led_control.py - Clean LED control with no GPIO warnings
 
 import RPi.GPIO as GPIO
 import time
 import threading
 from enum import Enum
+
+# Disable GPIO warnings
+GPIO.setwarnings(False)
 
 class LEDState(Enum):
     IDLE = "idle"           # Blinking red
@@ -13,14 +16,7 @@ class LEDState(Enum):
 
 class LEDController:
     def __init__(self, red_pin=18, green_pin=16, blink_interval=0.5):
-        """
-        Initialize LED controller
         
-        Args:
-            red_pin (int): GPIO pin for red LED
-            green_pin (int): GPIO pin for green LED  
-            blink_interval (float): Blink interval in seconds for idle state
-        """
         self.red_pin = red_pin
         self.green_pin = green_pin
         self.blink_interval = blink_interval
@@ -28,6 +24,12 @@ class LEDController:
         self.current_state = LEDState.OFF
         self.blink_thread = None
         self.stop_blink = threading.Event()
+        
+        # Clean up any existing GPIO setup first
+        try:
+            GPIO.cleanup([self.red_pin, self.green_pin])
+        except:
+            pass
         
         # Setup GPIO
         GPIO.setmode(GPIO.BCM)
@@ -114,9 +116,14 @@ def init_led_system(red_pin=18, green_pin=16):
     """Initialize the global LED controller"""
     global led_controller
     try:
+        # Clean up existing controller if it exists
+        if led_controller:
+            led_controller.cleanup()
+        
         led_controller = LEDController(red_pin, green_pin)
         return True
     except Exception as e:
+        print(f"LED init error: {e}")
         return False
 
 def set_led_idle():

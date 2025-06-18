@@ -5,9 +5,20 @@ import serial
 import adafruit_fingerprint
 import json
 import os
-import sqlite3
 import tkinter as tk
 from tkinter import simpledialog, messagebox
+
+# Import database operations
+from database.db_operations import (
+    get_student_by_id,
+    get_student_time_status,
+    record_time_in,
+    record_time_out,
+    record_time_attendance,
+    get_all_time_records,
+    clear_all_time_records,
+    get_students_currently_in
+)
 
 # =================== SETUP ===================
 uart = serial.Serial("/dev/ttyS0", baudrate=57600, timeout=1)
@@ -15,10 +26,8 @@ finger = adafruit_fingerprint.Adafruit_Fingerprint(uart)
 
 # File paths
 FINGERPRINT_DATA_FILE = "json_folder/fingerprint_database.json"
-STUDENT_DB_FILE = "database/students.db"
-TIME_TRACKING_DB = "database/time_tracking.db"
 
-# =================== DATABASE FUNCTIONS ===================
+# =================== JSON DATABASE FUNCTIONS ===================
 
 def load_fingerprint_database():
     """Load fingerprint database"""
@@ -32,225 +41,20 @@ def load_fingerprint_database():
 
 def save_fingerprint_database(database):
     """Save fingerprint database"""
+    os.makedirs(os.path.dirname(FINGERPRINT_DATA_FILE), exist_ok=True)
     with open(FINGERPRINT_DATA_FILE, 'w') as f:
         json.dump(database, f, indent=4)
 
-def get_student_by_id(student_id):
-    """Fetch student info by ID"""
-    try:
-        conn = sqlite3.connect(STUDENT_DB_FILE)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT full_name, license_number, expiration_date, course, student_id 
-            FROM students 
-            WHERE student_id = ?
-        ''', (student_id,))
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result:
-            return {
-                'full_name': result[0],
-                'license_number': result[1],
-                'expiration_date': result[2],
-                'course': result[3],
-                'student_id': result[4]
-            }
-        return None
-        
-    except sqlite3.Error:
-        return None
-
-# =================== TIME TRACKING ===================
-
-def init_time_database():
-    """Initialize time tracking database"""
-    try:
-        conn = sqlite3.connect(TIME_TRACKING_DB)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS time_records (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id TEXT NOT NULL,
-                student_name TEXT NOT NULL,
-                date TEXT NOT NULL,
-                time TEXT NOT NULL,
-                status TEXT NOT NULL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS current_status (
-                student_id TEXT PRIMARY KEY,
-                student_name TEXT NOT NULL,
-                current_status TEXT NOT NULL,
-                last_update DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
-        return True
-    except sqlite3.Error:
-        return False
-
-def get_student_time_status(student_id):
-    """Get current time status (IN/OUT)"""
-    try:
-        conn = sqlite3.connect(TIME_TRACKING_DB)
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT current_status FROM current_status WHERE student_id = ?', (student_id,))
-        result = cursor.fetchone()
-        conn.close()
-        
-        return result[0] if result else 'OUT'
-        
-    except sqlite3.Error:
-        return 'OUT'
-
-def record_time_in(student_info):
-    """Record student time in"""
-    try:
-        conn = sqlite3.connect(TIME_TRACKING_DB)
-        cursor = conn.cursor()
-        
-        current_date = time.strftime('%Y-%m-%d')
-        current_time = time.strftime('%H:%M:%S')
-        
-        cursor.execute('''
-            INSERT INTO time_records (student_id, student_name, date, time, status)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (student_info['student_id'], student_info['name'], current_date, current_time, 'IN'))
-        
-        cursor.execute('''
-            INSERT OR REPLACE INTO current_status (student_id, student_name, current_status)
-            VALUES (?, ?, ?)
-        ''', (student_info['student_id'], student_info['name'], 'IN'))
-        
-        conn.commit()
-        conn.close()
-        return True
-        
-    except sqlite3.Error:
-        return False
-
-def record_time_out(student_info):
-    """Record student time out"""
-    try:
-        conn = sqlite3.connect(TIME_TRACKING_DB)
-        cursor = conn.cursor()
-        
-        current_date = time.strftime('%Y-%m-%d')
-        current_time = time.strftime('%H:%M:%S')
-        
-        cursor.execute('''
-            INSERT INTO time_records (student_id, student_name, date, time, status)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (student_info['student_id'], student_info['name'], current_date, current_time, 'OUT'))
-        
-        cursor.execute('''
-            INSERT OR REPLACE INTO current_status (student_id, student_name, current_status)
-            VALUES (?, ?, ?)
-        ''', (student_info['student_id'], student_info['name'], 'OUT'))
-        
-        conn.commit()
-        conn.close()
-        return True
-        
-    except sqlite3.Error:
-        return False
-
-def record_time_attendance(student_info):
-    """Auto record time attendance based on current status"""
-    current_status = get_student_time_status(student_info['student_id'])
-    
-    if current_status == 'OUT' or current_status is None:
-        if record_time_in(student_info):
-            return f"🟢 TIME IN recorded for {student_info['name']} at {time.strftime('%H:%M:%S')}"
-        else:
-            return "❌ Failed to record TIME IN"
-    else:
-        if record_time_out(student_info):
-            return f"🔴 TIME OUT recorded for {student_info['name']} at {time.strftime('%H:%M:%S')}"
-        else:
-            return "❌ Failed to record TIME OUT"
-
-def get_all_time_records():
-    """Get all time records"""
-    try:
-        conn = sqlite3.connect(TIME_TRACKING_DB)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT student_id, student_name, date, time, status, timestamp
-            FROM time_records
-            ORDER BY timestamp DESC
-        ''')
-        
-        records = []
-        for row in cursor.fetchall():
-            records.append({
-                'student_id': row[0],
-                'student_name': row[1],
-                'date': row[2],
-                'time': row[3],
-                'status': row[4],
-                'timestamp': row[5]
-            })
-        
-        conn.close()
-        return records
-        
-    except sqlite3.Error:
-        return []
-
-def clear_all_time_records():
-    """Clear all time records"""
-    try:
-        conn = sqlite3.connect(TIME_TRACKING_DB)
-        cursor = conn.cursor()
-        
-        cursor.execute('DELETE FROM time_records')
-        cursor.execute('DELETE FROM current_status')
-        
-        conn.commit()
-        conn.close()
-        return True
-        
-    except sqlite3.Error:
-        return False
-
-def get_students_currently_in():
-    """Get students currently timed in"""
-    try:
-        conn = sqlite3.connect(TIME_TRACKING_DB)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT student_id, student_name, last_update
-            FROM current_status
-            WHERE current_status = 'IN'
-            ORDER BY last_update DESC
-        ''')
-        
-        students = []
-        for row in cursor.fetchall():
-            students.append({
-                'student_id': row[0],
-                'student_name': row[1],
-                'time_in': row[2]
-            })
-        
-        conn.close()
-        return students
-        
-    except sqlite3.Error:
-        return []
+def load_admin_database():
+    """Load admin database"""
+    admin_file = "json_folder/admin_database.json"
+    if os.path.exists(admin_file):
+        try:
+            with open(admin_file, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
 
 # =================== GUI FUNCTIONS ===================
 
@@ -311,10 +115,41 @@ def display_student_info(student_info):
     print(f"📅 Expiration: {student_info['expiration_date']}")
     print(f"{'='*50}")
 
+# =================== FINGERPRINT HELPER FUNCTIONS ===================
+
+def _capture_fingerprint_image(attempt_num, max_attempts=5):
+    """Helper function to capture fingerprint image with retry logic"""
+    print(f"👆 Place finger on sensor - Attempt {attempt_num}/{max_attempts}...")
+    
+    # Wait for finger with timeout
+    finger_detected = False
+    for _ in range(100):  # 10 second timeout
+        if finger.get_image() == adafruit_fingerprint.OK:
+            finger_detected = True
+            break
+        time.sleep(0.1)
+        print(".", end="")
+    
+    if not finger_detected:
+        print("\n⏰ Timeout waiting for finger")
+        return False
+    
+    print("✅ Finger detected!")
+    return True
+
+def _process_fingerprint_template(template_num):
+    """Helper function to process fingerprint template"""
+    print("🔄 Processing...", end="")
+    if finger.image_2_tz(template_num) != adafruit_fingerprint.OK:
+        print("❌ Failed to process")
+        return False
+    print("✅")
+    return True
+
 # =================== FINGERPRINT FUNCTIONS ===================
 
 def enroll_finger_with_student_info(location):
-    """Enhanced enrollment using Student ID"""
+    """Enhanced enrollment using Student ID with retry mechanism"""
     print(f"\n🔒 Starting enrollment for slot #{location}")
     
     student_info = get_student_id_gui()
@@ -325,29 +160,37 @@ def enroll_finger_with_student_info(location):
     display_student_info(student_info)
     print(f"👤 Enrolling: {student_info['full_name']}")
     
-    # Fingerprint enrollment process
+    # Fingerprint enrollment process with retry
     for fingerimg in range(1, 3):
-        print(f"👆 Place finger {'(first time)' if fingerimg == 1 else '(again)'}...", end="")
-
-        while finger.get_image() != adafruit_fingerprint.OK:
-            print(".", end="")
-        print("✅")
-
-        print("🔄 Processing...", end="")
-        if finger.image_2_tz(fingerimg) != adafruit_fingerprint.OK:
-            print("❌ Failed")
+        max_attempts = 5
+        success = False
+        
+        for attempt in range(1, max_attempts + 1):
+            if _capture_fingerprint_image(attempt, max_attempts):
+                if _process_fingerprint_template(fingerimg):
+                    success = True
+                    break
+            
+            if attempt < max_attempts:
+                retry = input("Try again? (y/n): ").lower() == 'y'
+                if not retry:
+                    print("❌ Enrollment cancelled")
+                    return False
+        
+        if not success:
+            print("❌ Failed to capture fingerprint after maximum attempts")
             return False
-        print("✅")
-
+        
         if fingerimg == 1:
-            print("✋ Remove finger")
-            time.sleep(1)
+            print("✋ Remove finger and wait...")
+            time.sleep(2)
             while finger.get_image() != adafruit_fingerprint.NOFINGER:
-                pass
+                time.sleep(0.1)
+            print("✅ Ready for second capture")
 
-    print("🗝️ Creating model...", end="")
+    print("🗝️ Creating fingerprint model...", end="")
     if finger.create_model() != adafruit_fingerprint.OK:
-        print("❌ Failed")
+        print("❌ Failed to create model")
         return False
     print("✅")
 
@@ -387,56 +230,146 @@ Enrollment Successful! ✅
         print("❌ Storage failed")
         return False
 
-def authenticate_fingerprint():
-    """Authenticate fingerprint and return student info"""
-    print("\n🔒 Place finger on sensor...")
+def authenticate_fingerprint(max_attempts=3):
+    """Authenticate fingerprint and return student info with retry mechanism"""
+    attempts = 0
     
-    while finger.get_image() != adafruit_fingerprint.OK:
-        pass
-    
-    print("🔄 Processing...")
-    if finger.image_2_tz(1) != adafruit_fingerprint.OK:
-        print("❌ Failed to process")
-        return None
-    
-    print("🔍 Searching...")
-    if finger.finger_search() != adafruit_fingerprint.OK:
-        print("❌ No match found")
-        return None
-    
-    database = load_fingerprint_database()
-    finger_id = str(finger.finger_id)
-    
-    if finger_id in database:
-        student_info = database[finger_id]
-        print(f"✅ Authentication successful!")
-        print(f"👤 Welcome: {student_info['name']}")
-        print(f"🆔 ID: {student_info.get('student_id', 'N/A')}")
-        print(f"📚 Course: {student_info.get('course', 'N/A')}")
-        print(f"🎯 Confidence: {finger.confidence}")
+    while attempts < max_attempts:
+        attempts += 1
+        print(f"\n🔒 Fingerprint Authentication (Attempt {attempts}/{max_attempts})")
+        print("👆 Place finger on sensor...")
         
-        return {
-            "name": student_info['name'],
-            "student_id": student_info.get('student_id', 'N/A'),
-            "course": student_info.get('course', 'N/A'),
-            "license_number": student_info.get('license_number', 'N/A'),
-            "license_expiration": student_info.get('license_expiration', 'N/A'),
-            "finger_id": finger.finger_id,
-            "confidence": finger.confidence,
-            "enrolled_date": student_info.get('enrolled_date', 'Unknown')
-        }
-    else:
-        print(f"⚠️ Fingerprint recognized (ID: {finger.finger_id}) but no student data found")
-        return {
-            "name": f"Unknown User (ID: {finger.finger_id})",
-            "student_id": "N/A",
-            "course": "N/A",
-            "license_number": "N/A",
-            "license_expiration": "N/A",
-            "finger_id": finger.finger_id,
-            "confidence": finger.confidence,
-            "enrolled_date": "Unknown"
-        }
+        # Wait for finger placement
+        while finger.get_image() != adafruit_fingerprint.OK:
+            pass
+        
+        print("🔄 Processing...")
+        if finger.image_2_tz(1) != adafruit_fingerprint.OK:
+            print("❌ Failed to process fingerprint image")
+            if attempts < max_attempts:
+                print("🔄 Please try again...")
+                time.sleep(1)
+                continue
+            else:
+                print("❌ Maximum attempts reached. Authentication failed.")
+                return None
+        
+        print("🔍 Searching...")
+        if finger.finger_search() != adafruit_fingerprint.OK:
+            print("❌ No fingerprint match found")
+            
+            if attempts < max_attempts:
+                print(f"🔄 Try again? ({max_attempts - attempts} attempts remaining)")
+                choice = input("Press Enter to retry, or 'q' to quit: ").strip().lower()
+                if choice == 'q':
+                    print("❌ Authentication cancelled by user")
+                    return None
+                continue
+            else:
+                print("❌ Maximum attempts reached. No match found.")
+                return None
+        
+        # Authentication successful - get student info
+        database = load_fingerprint_database()
+        finger_id = str(finger.finger_id)
+        
+        if finger_id in database:
+            student_info = database[finger_id]
+            print(f"✅ Authentication successful!")
+            print(f"👤 Welcome: {student_info['name']}")
+            print(f"🆔 ID: {student_info.get('student_id', 'N/A')}")
+            print(f"📚 Course: {student_info.get('course', 'N/A')}")
+            print(f"🎯 Confidence: {finger.confidence}")
+            
+            return {
+                "name": student_info['name'],
+                "student_id": student_info.get('student_id', 'N/A'),
+                "course": student_info.get('course', 'N/A'),
+                "license_number": student_info.get('license_number', 'N/A'),
+                "license_expiration": student_info.get('license_expiration', 'N/A'),
+                "finger_id": finger.finger_id,
+                "confidence": finger.confidence,
+                "enrolled_date": student_info.get('enrolled_date', 'Unknown')
+            }
+        else:
+            print(f"⚠️ Fingerprint recognized (ID: {finger.finger_id}) but no student data found")
+            return {
+                "name": f"Unknown User (ID: {finger.finger_id})",
+                "student_id": "N/A",
+                "course": "N/A",
+                "license_number": "N/A",
+                "license_expiration": "N/A",
+                "finger_id": finger.finger_id,
+                "confidence": finger.confidence,
+                "enrolled_date": "Unknown"
+            }
+    
+    return None
+
+def authenticate_admin(max_attempts=3):
+    """Authenticate admin using fingerprint with retry mechanism"""
+    attempts = 0
+    
+    while attempts < max_attempts:
+        attempts += 1
+        print(f"\n🔐 ADMIN AUTHENTICATION (Attempt {attempts}/{max_attempts})")
+        print("👆 Place admin finger on sensor...")
+        
+        # Wait for finger and process
+        while finger.get_image() != adafruit_fingerprint.OK:
+            print(".", end="")
+            time.sleep(0.1)
+        
+        print("\n🔄 Processing...")
+        if finger.image_2_tz(1) != adafruit_fingerprint.OK:
+            print("❌ Failed to process fingerprint")
+            if attempts < max_attempts:
+                print("🔄 Please try again...")
+                time.sleep(1)
+                continue
+            else:
+                print("❌ Maximum attempts reached. Authentication failed.")
+                return False
+        
+        print("🔍 Searching...")
+        if finger.finger_search() != adafruit_fingerprint.OK:
+            print("❌ No match found")
+            if attempts < max_attempts:
+                print(f"🔄 Try again? ({max_attempts - attempts} attempts remaining)")
+                choice = input("Press Enter to retry, or 'q' to quit: ").strip().lower()
+                if choice == 'q':
+                    print("❌ Admin authentication cancelled")
+                    return False
+                continue
+            else:
+                print("❌ Maximum attempts reached. Access denied.")
+                return False
+        
+        # Check if matched fingerprint is admin (slot 1)
+        if finger.finger_id == 1:
+            try:
+                admin_db = load_admin_database()
+                admin_name = admin_db.get("1", {}).get("name", "Admin User")
+            except:
+                admin_name = "Admin User"
+            
+            print(f"✅ Welcome Admin: {admin_name}")
+            print(f"🎯 Confidence: {finger.confidence}")
+            return True
+        else:
+            print("❌ Not an admin fingerprint")
+            if attempts < max_attempts:
+                print(f"🔄 Please use admin fingerprint. Try again? ({max_attempts - attempts} attempts remaining)")
+                choice = input("Press Enter to retry, or 'q' to quit: ").strip().lower()
+                if choice == 'q':
+                    print("❌ Admin authentication cancelled")
+                    return False
+                continue
+            else:
+                print("❌ Maximum attempts reached. Access denied.")
+                return False
+    
+    return False
 
 def authenticate_fingerprint_with_time_tracking():
     """Authenticate fingerprint and auto handle time in/out"""
@@ -450,7 +383,12 @@ def authenticate_fingerprint_with_time_tracking():
     
     return student_info
 
+def authenticate_fingerprint_custom_retry(max_attempts=3):
+    """Authenticate fingerprint with custom retry count"""
+    return authenticate_fingerprint(max_attempts)
+
 # =================== LEGACY SUPPORT ===================
+
 def enroll_finger_with_name(location):
     """Legacy function - redirects to new enrollment"""
     print("⚠️ Using legacy enrollment. Consider using enroll_finger_with_student_info().")

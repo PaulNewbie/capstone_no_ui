@@ -1,4 +1,5 @@
 from utils.gui_helpers import show_message_gui
+import time
 
 def show_results_gui(title, message):
     """Show results in GUI message box"""
@@ -16,13 +17,20 @@ def get_num(max_number):
         print("❌ Please enter a valid number.")
 
 def display_menu(menu_config):
-    """Display formatted menu with title and options"""
-    print(f"\n{'=' * 50}")
-    print(menu_config['title'])
-    print('=' * 50)
+    """
+    Display a formatted menu from config
+    
+    Args:
+        menu_config (dict): Menu configuration with 'title' and 'options'
+    """
+    display_separator()
+    print(f"\n{menu_config['title']}")
+    display_separator()
+    
     for option in menu_config['options']:
-        print(option)
-    print('=' * 50)
+        print(f"  {option}")
+    
+    display_separator()
 
 def get_user_input(prompt):
     """Get user input with consistent formatting"""

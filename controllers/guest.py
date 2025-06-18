@@ -1,91 +1,74 @@
-# controllers/guest.py - Cleaned Guest Controller
+# controllers/guest.py - Simplified Guest Controller with Clean Logging
 
 from services.license_reader import *
 from services.helmet_infer import verify_helmet
 from services.time_tracker import *
+from services.led_control import *  
 from utils.display_helpers import display_separator, display_verification_result
 from utils.gui_helpers import show_results_gui, get_guest_info_gui, updated_guest_office_gui
 import difflib
 import time
 
 def guest_verification():
-    """Main guest verification workflow"""
-    print("\n👤 GUEST VERIFICATION SYSTEM")
+    """Main guest verification workflow - simplified logging"""
+    print("\n🎫 GUEST VERIFICATION SYSTEM")
+    
+    set_led_processing()
     
     # Step 1: Helmet verification
+    print("🪖 Checking helmet...")
     if not verify_helmet():
+        print("❌ Helmet verification failed")
+        set_led_idle()
         input("\n📱 Press Enter to return...")
         return
+    
+    print("✅ Helmet verified")
     
     # Step 2: Capture license
     print("📄 Starting license capture...")
     image_path = auto_capture_license_rpi()
     
     if not image_path:
-        print("❌ License capture failed.")
+        print("❌ License capture failed")
+        set_led_idle()
         input("\n📱 Press Enter to return...")
         return
     
-    # Step 3: Extract name
+    # Step 3: Extract name and check guest status
     ocr_preview = extract_text_from_image(image_path)
     ocr_lines = [line.strip() for line in ocr_preview.splitlines() if line.strip()]
     detected_name = extract_guest_name_from_license(ocr_lines)
     
     print(f"📄 Detected name: {detected_name}")
     
-    # Step 4: Check guest status
     current_status, guest_info = get_guest_time_status(detected_name)
     
     if current_status == 'IN':
         # Process TIME OUT
-        print(f"\n✅ Found timed-in guest: {guest_info['name']}")
-        print(f"🚗 Plate: {guest_info['plate_number']}")
-        print(f"📅 Timed in: {guest_info['last_date']} at {guest_info['last_time']}")
-        print(f"🎯 Match: {guest_info['similarity_score']*100:.1f}%")
-        print("\n🔴 PROCESSING TIME OUT...")
+        print(f"✅ Found guest: {guest_info['name']} ({guest_info['similarity_score']*100:.1f}% match)")
+        print("🔴 TIMING OUT...")
+        print("🛡️ Drive safe!")
         
         time_result = process_guest_time_out(guest_info)
-        print(f"\n🕒 {time_result['message']}")
+        print(f"🕒 {time_result['message']}")
         
-        verification_checks = {
-            '🪖 Helmet': (True, 'VERIFIED'),
-            '🆔 License': (True, 'VERIFIED'),
-            '👤 Name Match': (True, f"MATCHED ({guest_info['similarity_score']*100:.1f}%)")
-        }
-        
-        gui_message = f"""
-GUEST TIME OUT COMPLETE!
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-👤 Guest: {guest_info['name']}
-🚗 Plate: {guest_info['plate_number']}
-📅 Original Time In: {guest_info['last_date']} {guest_info['last_time']}
-🎯 Match: {guest_info['similarity_score']*100:.1f}%
-
-{time_result['message']}
-Status: {time_result['status']}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        """
-        
-        guest_data = {
-            'name': guest_info['name'],
-            'plate_number': guest_info['plate_number'],
-            'office': guest_info.get('office', 'Previous Visit'),
-            'is_guest': True
-        }
+        if time_result['success']:
+            set_led_success(duration=5.0)
+        else:
+            set_led_idle()
         
     elif current_status == 'OUT' and guest_info is not None:
         # Process returning guest TIME IN
-        print(f"\n✅ Found returning guest: {guest_info['name']}")
-        print(f"🚗 Plate: {guest_info['plate_number']}")
-        print(f"📅 Last activity: {guest_info['last_date']} at {guest_info['last_time']} (OUT)")
-        print(f"🎯 Match: {guest_info['similarity_score']*100:.1f}%")
-        print("\n🟢 PROCESSING TIME IN...")
+        print(f"✅ Returning guest: {guest_info['name']} ({guest_info['similarity_score']*100:.1f}% match)")
+        print("🟢 TIMING IN...")
         
         # Get updated office info
         updated_guest_info = updated_guest_office_gui(guest_info['name'], guest_info.get('office', 'CSS Office'))
         
         if not updated_guest_info:
-            print("❌ Office update cancelled.")
+            print("❌ Office update cancelled")
+            set_led_idle()
             input("\n📱 Press Enter to return...")
             return
         
@@ -106,47 +89,38 @@ Status: {time_result['status']}
             'is_guest': True
         }
         
-        license_result = licenseReadGuest(image_path, guest_data_for_license)
-        time_result = process_guest_time_in(existing_guest_info, license_result)
-        print(f"\n🕒 {time_result['message']}")
+        # Use the simplified guest verification flow
+        is_guest_verified = complete_guest_verification_flow(
+            image_path=image_path,
+            guest_info=guest_data_for_license,
+            helmet_verified=True
+        )
         
-        verification_checks = {
-            '🪖 Helmet': (True, 'VERIFIED'),
-            '🆔 License': (True, 'VERIFIED'),
-            '👤 Returning Guest': (True, f"RECOGNIZED ({guest_info['similarity_score']*100:.1f}%)")
-        }
-        
-        gui_message = f"""
-RETURNING GUEST TIME IN COMPLETE!
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-👤 Guest: {existing_guest_info['name']}
-🚗 Plate: {existing_guest_info['plate_number']}
-🏢 Office: {existing_guest_info['office']}
-📄 License: ✅ Verified
-🎯 Recognition: {guest_info['similarity_score']*100:.1f}%
-
-{time_result['message']}
-Status: {time_result['status']}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        """
-        
-        guest_data = guest_data_for_license
+        if is_guest_verified:
+            time_result = process_guest_time_in(existing_guest_info)
+            print(f"🕒 {time_result['message']}")
+            
+            if time_result['success']:
+                set_led_success(duration=5.0)
+            else:
+                set_led_idle()
+        else:
+            print("❌ Guest verification failed")
+            set_led_idle()
         
     else:
         # New guest TIME IN
-        print("\n🟢 New guest detected. Processing TIME IN...")
+        print("🟢 New guest - TIMING IN...")
         
         guest_info_input = get_guest_info_gui(detected_name)
         
         if not guest_info_input:
-            print("❌ Guest info cancelled.")
+            print("❌ Guest info cancelled")
+            set_led_idle()
             input("\n📱 Press Enter to return...")
             return
         
-        print(f"✅ Guest info collected:")
-        print(f"   👤 Name: {guest_info_input['name']}")
-        print(f"   🚗 Plate: {guest_info_input['plate_number']}")
-        print(f"   🏢 Office: {guest_info_input['office']}")
+        print(f"✅ Guest info: {guest_info_input['name']} | {guest_info_input['plate_number']} | {guest_info_input['office']}")
         
         guest_data_for_license = {
             'name': guest_info_input['name'],
@@ -159,48 +133,31 @@ Status: {time_result['status']}
             'is_guest': True
         }
         
-        license_result = licenseReadGuest(image_path, guest_data_for_license)
-        time_result = process_guest_time_in(guest_info_input, license_result)
-        print(f"\n🕒 {time_result['message']}")
+        # Use the simplified guest verification flow
+        is_guest_verified = complete_guest_verification_flow(
+            image_path=image_path,
+            guest_info=guest_data_for_license,
+            helmet_verified=True
+        )
         
-        license_verified = "Driver's License Detected" in license_result.document_verified
-        
-        verification_checks = {
-            '🪖 Helmet': (True, 'VERIFIED'),
-            '🆔 License': (license_verified, 'VERIFIED' if license_verified else 'PROCESSED'),
-            '👤 Guest Info': (True, 'CONFIRMED')
-        }
-        
-        gui_message = f"""
-NEW GUEST TIME IN COMPLETE!
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-👤 Guest: {guest_info_input['name']}
-🚗 Plate: {guest_info_input['plate_number']}
-🏢 Visiting: {guest_info_input['office']}
-📄 License: {'✅ Verified' if license_verified else '✅ Processed'}
-
-{time_result['message']}
-Status: {time_result['status']}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        """
-        
-        guest_data = guest_data_for_license
+        if is_guest_verified:
+            time_result = process_guest_time_in(guest_info_input)
+            print(f"🕒 {time_result['message']}")
+            
+            if time_result['success']:
+                set_led_success(duration=5.0)
+            else:
+                set_led_idle()
+        else:
+            print("❌ Guest verification failed")
+            set_led_idle()
     
-    # Display results
-    verification_data = {
-        'checks': verification_checks,
-        'overall_status': time_result['status'],
-        'status_color': time_result['color'],
-        'gui_message': gui_message
-    }
-    
-    display_verification_result(guest_data, verification_data)
     input("\n📱 Press Enter to return...")
 
 def extract_guest_name_from_license(ocr_lines):
-    """Extract guest name from license OCR"""
+    """Extract guest name from license OCR - simplified"""
     filter_keywords = [
-        'ROAD', 'STREET', 'AVENUE', 'DISTRICT', 'CITY', 'PROVINCE',
+        'ROAD', 'STREET', 'AVENUE', 'DISTRICT', 'CITY', 'PROVINCE', 'MARILAO', 'BULACAN',
         'BARANGAY', 'REPUBLIC', 'PHILIPPINES', 'TRANSPORTATION', 
         'DRIVER', 'LICENSE', 'NATIONALITY', 'ADDRESS', 'WEIGHT', 'HEIGHT'
     ]
@@ -232,7 +189,7 @@ def extract_guest_name_from_license(ocr_lines):
     return "Guest"
 
 def get_guest_time_status(detected_name, plate_number=None):
-    """Get current time status of guest based on name matching"""
+    """Get current time status of guest - simplified logging"""
     try:
         import sqlite3
         from difflib import SequenceMatcher
@@ -257,7 +214,7 @@ def get_guest_time_status(detected_name, plate_number=None):
         if not latest_records:
             return None, None
         
-        print(f"🔍 Checking {len(latest_records)} guest records...")
+        print(f"🔍 Checking against {len(latest_records)} guest records...")
         
         # Find best name match
         best_match = None
@@ -279,8 +236,6 @@ def get_guest_time_status(detected_name, plate_number=None):
                 guest_plate = record[1].replace('GUEST_', '')
                 if plate_number.upper() == guest_plate.upper():
                     similarity = max(similarity, 0.9)
-            
-            print(f"   📋 '{detected_name}' vs '{guest_name}' = {similarity:.2f}")
             
             if similarity > highest_similarity and similarity > 0.6:
                 highest_similarity = similarity
@@ -316,45 +271,34 @@ def create_guest_time_data(guest_info):
         'confidence': 100
     }
 
-def process_guest_time_in(guest_info, license_result):
-    """Process guest time in with license verification"""
+def process_guest_time_in(guest_info):
+    """Process guest time in - simplified"""
     guest_time_data = create_guest_time_data(guest_info)
     
-    license_verified = ("Driver's License Detected" in license_result.document_verified or 
-                       "Document Detected" in license_result.document_verified)
-    
-    if license_verified:
-        if record_time_in(guest_time_data):
-            return {
-                'success': True,
-                'status': "✅ GUEST TIME IN SUCCESSFUL",
-                'message': f"🟢 TIME IN recorded at {time.strftime('%H:%M:%S')}",
-                'color': "🟢"
-            }
-        else:
-            return {
-                'success': False,
-                'status': "❌ TIME IN FAILED",
-                'message': "❌ Failed to record TIME IN",
-                'color': "🔴"
-            }
+    if record_time_in(guest_time_data):
+        return {
+            'success': True,
+            'status': "✅ GUEST TIME IN SUCCESSFUL",
+            'message': f"✅ TIME IN SUCCESSFUL - {time.strftime('%H:%M:%S')}",
+            'color': "🟢"
+        }
     else:
         return {
             'success': False,
-            'status': "❌ VERIFICATION FAILED",
-            'message': "❌ License verification failed",
+            'status': "❌ TIME IN FAILED",
+            'message': "❌ Failed to record TIME IN",
             'color': "🔴"
         }
 
 def process_guest_time_out(guest_info):
-    """Process guest time out"""
+    """Process guest time out - simplified"""
     guest_time_data = create_guest_time_data(guest_info)
     
     if record_time_out(guest_time_data):
         return {
             'success': True,
             'status': "✅ GUEST TIME OUT SUCCESSFUL",
-            'message': f"🔴 TIME OUT recorded at {time.strftime('%H:%M:%S')}",
+            'message': f"✅ TIME OUT SUCCESSFUL - {time.strftime('%H:%M:%S')}",
             'color': "🟢"
         }
     else:
