@@ -24,14 +24,22 @@ OCR_CONFIG_DETAILED = '--psm 4 --oem 3'
 OPTIMAL_WIDTH, OPTIMAL_HEIGHT = 1280, 960
 MIN_WIDTH, MIN_HEIGHT = 640, 480
 CACHE_DIR = "cache/ocr"
-MAX_CACHE_FILES = 5
+MAX_CACHE_FILES = 10
 
 VERIFICATION_KEYWORDS = [
     "REPUBLIC", "PHILIPPINES", "DEPARTMENT", "TRANSPORTATION", 
     "LAND TRANSPORTATION OFFICE", "DRIVER'S LICENSE", "DRIVERS LICENSE",
-    "LICENSE", "NON-PROFESSIONAL", "PROFESSIONAL", "Last Name", "First Name", 
-    "Middle Name", "Nationality", "Date of Birth", "Address", "License No", 
-    "Expiration Date", "EXPIRATION", "ADDRESS"
+    "LICENSE", "NON-PROFESSIONAL", "PROFESSIONAL", "LAST NAME", "FIRST NAME", 
+    "MIDDLE NAME", "NATIONALITY", "DATE OF BIRTH", "ADDRESS", "LICENSE NO", 
+    "EXPIRATION DATE", "CONDITIONS", "EYES COLOR", "AGENCY CODE", "WEIGHT", 
+    "HEIGHT", "BLOOD TYPE", "RESTRICTION", "SIGNATURE"
+]
+
+FILTER_KEYWORDS = [
+    'REPUBLIC', 'PHILIPPINES', 'TRANSPORTATION', 'DRIVER', 'LICENSE', 
+    'NATIONALITY', 'ADDRESS', 'DATE', 'EXPIRATION', 'WEIGHT', 'HEIGHT',
+    'CITY', 'PROVINCE', 'STREET', 'ROAD', 'BARANGAY', 'BLOCK', 'LOT', 
+    'BLK', 'PH', 'RESIDENCIA', 'MARILAO', 'BULACAN'
 ]
 
 MIN_KEYWORDS_FOR_SUCCESS = 2
@@ -49,6 +57,7 @@ class NameInfo:
 # ============== CACHING SYSTEM ==============
 
 def _get_cache_key(image_path: str) -> str:
+    """Generate cache key from image file"""
     try:
         with open(image_path, 'rb') as f:
             start = f.read(1024)
@@ -59,6 +68,7 @@ def _get_cache_key(image_path: str) -> str:
         return hashlib.md5(image_path.encode()).hexdigest()
 
 def _get_cached_result(image_path: str, method: str) -> Optional[str]:
+    """Get cached OCR result if available"""
     try:
         os.makedirs(CACHE_DIR, exist_ok=True)
         cache_key = f"{_get_cache_key(image_path)}_{method}"
@@ -72,6 +82,7 @@ def _get_cached_result(image_path: str, method: str) -> Optional[str]:
     return None
 
 def _cache_result(image_path: str, method: str, text: str):
+    """Cache OCR result for future use"""
     try:
         os.makedirs(CACHE_DIR, exist_ok=True)
         cache_key = f"{_get_cache_key(image_path)}_{method}"
@@ -84,6 +95,7 @@ def _cache_result(image_path: str, method: str, text: str):
         pass
 
 def _cleanup_old_cache():
+    """Remove old cache files to save space (limit to 10 files)"""
     try:
         cache_files = [f for f in os.listdir(CACHE_DIR) if f.endswith('.txt')]
         if len(cache_files) > MAX_CACHE_FILES:
@@ -92,6 +104,35 @@ def _cleanup_old_cache():
                 os.remove(os.path.join(CACHE_DIR, old_file))
     except:
         pass
+
+# ============== TEMP FILE MANAGEMENT ==============
+
+_temp_files = []
+
+def register_temp_file(filepath: str) -> None:
+    global _temp_files
+    if filepath not in _temp_files:
+        _temp_files.append(filepath)
+
+def cleanup_all_temp_files() -> None:
+    global _temp_files
+    for filepath in _temp_files[:]:
+        _safe_delete_temp_file(filepath)
+
+def safe_delete_temp_file(filepath: str) -> None:
+    _safe_delete_temp_file(filepath)
+
+def _safe_delete_temp_file(filepath: str) -> None:
+    global _temp_files
+    try:
+        if filepath and os.path.exists(filepath):
+            os.remove(filepath)
+            if filepath in _temp_files:
+                _temp_files.remove(filepath)
+    except:
+        pass
+
+atexit.register(cleanup_all_temp_files)
 
 # ============== IMAGE PROCESSING ==============
 
@@ -151,6 +192,7 @@ def _calculate_confidence_score(text: str, keywords_found: int) -> int:
     return min(100, int(base_score))
 
 def _extract_text_smart(image_path: str, is_guest: bool = False) -> str:
+    """Smart OCR extraction with caching"""
     cache_method = "guest" if is_guest else "smart"
     cached_result = _get_cached_result(image_path, cache_method)
     if cached_result:
@@ -206,54 +248,138 @@ def _extract_text_smart(image_path: str, is_guest: bool = False) -> str:
     except Exception as e:
         return f"Error extracting text: {str(e)}"
 
-# ============== IMAGE QUALITY CHECKS ==============
+# ============== NAME EXTRACTION ==============
 
-def _check_image_quality(image: np.ndarray) -> bool:
-    try:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
-        sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
-        mean_brightness = gray.mean()
-        contrast = gray.std()
-        
-        return sharpness > 100 and 50 < mean_brightness < 200 and contrast > 30
-    except:
-        return False
+def _format_name(name: str) -> str:
+    """Format extracted name to proper case"""
+    if ',' in name:
+        parts = name.split(',')
+        if len(parts) == 2:
+            last_name = parts[0].strip().title()
+            first_part = parts[1].strip().title()
+            return f"{first_part} {last_name}"
+    
+    return name.title()
 
-# ============== TEMP FILE MANAGEMENT ==============
-
-_temp_files = []
-
-def register_temp_file(filepath: str) -> None:
-    global _temp_files
-    if filepath not in _temp_files:
-        _temp_files.append(filepath)
-
-def cleanup_all_temp_files() -> None:
-    global _temp_files
-    for filepath in _temp_files[:]:
-        _safe_delete_temp_file(filepath)
-
-def safe_delete_temp_file(filepath: str) -> None:
-    _safe_delete_temp_file(filepath)
-
-def _safe_delete_temp_file(filepath: str) -> None:
-    global _temp_files
-    try:
-        if filepath and os.path.exists(filepath):
-            os.remove(filepath)
-            if filepath in _temp_files:
-                _temp_files.remove(filepath)
-    except:
-        pass
-
-atexit.register(cleanup_all_temp_files)
-
-# ============== MAIN OCR FUNCTIONS ==============
+def _detect_name_from_ocr(raw_text: str, is_guest: bool = False) -> Optional[str]:
+    """Simple and reliable name detection"""
+    import re
+    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    
+    if is_guest:
+        # Check first 15 lines only
+        for line in lines[:15]:
+            original_line = line.strip()
+            line_upper = line.upper().strip()
+            
+            # Remove common OCR artifacts: leading numbers, dots, special chars
+            line_clean = re.sub(r'^[\d\.\-\s]+', '', line_upper)
+            
+            # Skip empty or too short lines
+            if not line_clean or len(line_clean) < 7:
+                continue
+            
+            # Must have exactly one comma
+            if line_clean.count(',') != 1:
+                continue
+            
+            # Skip if line is too long (likely not a name)
+            if len(line_clean) > 50:
+                continue
+            
+            # ADDRESS PATTERNS TO SKIP - More comprehensive list
+            address_indicators = [
+                'BLK', 'BLOCK', 'LOT', 'PHASE', 'PH', 
+                'STREET', 'ST', 'ROAD', 'RD', 'AVENUE', 'AVE',
+                'BARANGAY', 'BRGY', 'CITY', 'PROVINCE',
+                'UNIT', 'BLDG', 'BUILDING', 'FLOOR', 'FLR',
+                'SUBDIVISION', 'SUBD', 'VILLAGE', 'VILL',
+                'RESIDENCIA', 'RESIDENCE', 'APARTMENT', 'APT',
+                'CONDO', 'CONDOMINIUM', 'TOWNHOUSE',
+                'ZIP', 'POSTAL', 'PUROK', 'SITIO'
+            ]
+            
+            # Check if line contains address indicators (check individual words)
+            line_words = line_clean.split()
+            if any(word in address_indicators for word in line_words):
+                continue
+            
+            # Skip obvious document keywords
+            skip_words = [
+                'REPUBLIC', 'PHILIPPINES', 'DEPARTMENT', 'TRANSPORTATION', 
+                'LICENSE', 'DRIVER', 'ADDRESS', 'NATIONALITY', 'OFFICE',
+                'EXPIRATION', 'REGISTRATION', 'HEIGHT', 'WEIGHT',
+                'RESTRICTION', 'CONDITION', 'BLOOD', 'TYPE'
+            ]
+            if any(word in line_clean for word in skip_words):
+                continue
+            
+            # Skip lines with multi-digit numbers (common in addresses)
+            if re.search(r'\b\d{2,}\b', line_clean):
+                continue
+            
+            # Split and validate
+            try:
+                lastname, firstname = line_clean.split(',')
+                lastname = lastname.strip()
+                firstname = firstname.strip()
+                
+                # Clean names - remove any non-letter characters except spaces
+                lastname_clean = re.sub(r'[^A-Z\s]', '', lastname).strip()
+                firstname_clean = re.sub(r'[^A-Z\s]', '', firstname).strip()
+                
+                # Basic validation
+                if (lastname_clean and firstname_clean and
+                    len(lastname_clean) >= 2 and len(lastname_clean) <= 20 and
+                    len(firstname_clean) >= 2 and len(firstname_clean) <= 30 and
+                    lastname_clean.replace(' ', '').isalpha() and
+                    firstname_clean.replace(' ', '').isalpha()):
+                    
+                    # Check word count (names typically don't have too many words)
+                    if (len(lastname_clean.split()) <= 3 and 
+                        len(firstname_clean.split()) <= 4):
+                        # Keep original format: "SURNAME, FIRSTNAME MIDDLENAME"
+                        return f"{lastname_clean}, {firstname_clean}"
+                        
+            except:
+                continue
+    
+    # For students (existing logic)
+    else:
+        for line in lines:
+            clean = re.sub(r"[^A-Z\s,.]", "", line.upper()).strip()
+            if any(header in clean for header in VERIFICATION_KEYWORDS):
+                continue
+            if 4 < len(clean) < 60 and clean.replace(" ", "").isalpha() and " " in clean:
+                return clean.title()
+    
+    return None
+    
+# ============== MAIN API FUNCTIONS ==============
 
 def extract_text_from_image(image_path: str, config: str = OCR_CONFIG_STANDARD) -> str:
+    """Extract text from license image"""
     return _extract_text_smart(image_path, is_guest=False)
 
+def extract_guest_name_from_license(ocr_lines: List[str]) -> str:
+    """Extract guest name from OCR lines"""
+    # Convert lines to text for unified processing
+    raw_text = '\n'.join(ocr_lines)
+    detected_name = _detect_name_from_ocr(raw_text, is_guest=True)
+    
+    # Debug output
+    if detected_name:
+        print(f"Debug: Successfully extracted name: {detected_name}")
+    else:
+        print("Debug: No name found, using 'Guest'")
+        print("Debug: First 10 OCR lines:")
+        for i, line in enumerate(ocr_lines[:10]):
+            print(f"  {i}: {line}")
+    
+    return detected_name if detected_name else "Guest"
+
 def find_best_line_match(input_name: str, ocr_lines: List[str]) -> Tuple[Optional[str], float]:
+    """Find best matching line for given name"""
     best_match, best_score = None, 0.0
     
     for line in ocr_lines:
@@ -285,6 +411,7 @@ def find_best_line_match(input_name: str, ocr_lines: List[str]) -> Tuple[Optiona
     return best_match, best_score
 
 def format_text_output(raw_text: str) -> str:
+    """Format OCR text output"""
     lines = raw_text.splitlines()
     cleaned = []
     for line in lines:
@@ -294,143 +421,8 @@ def format_text_output(raw_text: str) -> str:
             cleaned.append(sanitized)
     return "\n".join(cleaned)
 
-def extract_name_from_lines(image_path: str, reference_name: str = "", best_ocr_match: str = "", match_score: float = 0.0) -> Dict[str, str]:
-    if not reference_name:
-        return extract_guest_name_from_license_simple(image_path)
-    
-    raw_text = _extract_text_smart(image_path, is_guest=False)
-    full_text = " ".join(raw_text.splitlines()).upper()
-    
-    keywords_found = _count_verification_keywords(full_text)
-    is_verified = keywords_found >= 2
-    
-    doc_status = "Driver's License Detected" if is_verified else "Unverified Document"
-    name_info = {"Document Verified": doc_status}
-    
-    # Check match confidence levels
-    if reference_name and match_score >= 0.65:
-        name_info.update({
-            "Name": reference_name,
-            "Matched From": "Fingerprint Authentication (High Confidence)",
-            "Match Confidence": f"{match_score * 100:.1f}%"
-        })
-    elif best_ocr_match and match_score > 0.50:
-        name_info.update({
-            "Name": best_ocr_match,
-            "Matched From": "Best OCR Line Match",
-            "Match Confidence": f"{match_score * 100:.1f}%"
-        })
-    else:
-        detected_name = _detect_name_pattern(raw_text)
-        if detected_name:
-            name_info.update({"Name": detected_name, "Matched From": "Pattern Detection"})
-        else:
-            name_info["Name"] = "Not Found"
-    
-    return name_info
-
-def extract_guest_name_from_license_simple(image_path: str) -> Dict[str, str]:
-    raw_text = _extract_text_smart(image_path, is_guest=True)
-    full_text = " ".join(raw_text.splitlines()).upper()
-    
-    keywords_found = _count_verification_keywords(full_text)
-    is_verified = keywords_found >= 1
-    
-    doc_status = "Driver's License Detected" if is_verified else "Document Detected"
-    ocr_lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-    
-    detected_name = extract_guest_name_from_license(ocr_lines)
-    
-    return {
-        "Document Verified": doc_status,
-        "Name": detected_name if detected_name and detected_name != "Guest" else "Guest User",
-        "Matched From": "Simple Guest Extraction" if detected_name and detected_name != "Guest" else "Default Guest Name"
-    }
-
-def extract_guest_name_from_license(ocr_lines: List[str]) -> str:
-    filter_keywords = [
-        'ROAD', 'STREET', 'AVENUE', 'DISTRICT', 'CITY', 'PROVINCE', 'MARILAO', 'BULACAN',
-        'BARANGAY', 'REPUBLIC', 'PHILIPPINES', 'TRANSPORTATION', 
-        'DRIVER', 'LICENSE', 'NATIONALITY', 'ADDRESS', 'WEIGHT', 'HEIGHT'
-    ]
-    
-    potential_names = []
-    
-    for line in ocr_lines:
-        line_clean = line.strip().upper()
-        
-        if (not line_clean or len(line_clean) < 5 or len(line_clean) > 50 or
-            any(keyword in line_clean for keyword in filter_keywords) or
-            any(char.isdigit() for char in line_clean)):
-            continue
-        
-        if line_clean.replace(" ", "").replace(",", "").isalpha() and " " in line_clean:
-            score = 0
-            if "," in line_clean: score += 10
-            word_count = len(line_clean.split())
-            if 2 <= word_count <= 4: score += 5
-            if 10 <= len(line_clean) <= 30: score += 3
-            potential_names.append((line_clean, score))
-    
-    if potential_names:
-        potential_names.sort(key=lambda x: x[1], reverse=True)
-        best_name = potential_names[0][0]
-        return _format_extracted_name_simple(best_name)
-    
-    return "Guest"
-
-def _format_extracted_name_simple(name: str) -> str:
-    if ',' in name:
-        parts = name.split(',')
-        if len(parts) == 2:
-            last_name = parts[0].strip().title()
-            first_part = parts[1].strip().title()
-            return f"{first_part} {last_name}"
-    
-    return name.title()
-
-def _detect_name_pattern(raw_text: str) -> Optional[str]:
-    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-    
-    # Extended filter keywords for better name detection
-    filter_keywords = [
-        'REPUBLIC', 'PHILIPPINES', 'DEPARTMENT', 'TRANSPORTATION', 
-        'LAND TRANSPORTATION OFFICE', 'DRIVER', 'LICENSE', 'DRIVERS LICENSE',
-        'NON-PROFESSIONAL', 'PROFESSIONAL', 'NATIONALITY', 'ADDRESS', 
-        'DATE OF BIRTH', 'EXPIRATION', 'AGENCY CODE', 'CONDITIONS',
-        'EYES COLOR', 'WEIGHT', 'HEIGHT', 'BLOOD TYPE', 'RESTRICTION',
-        'SIGNATURE', 'PHOTO', 'FIRST NAME', 'LAST NAME', 'MIDDLE NAME',
-        'CITY', 'PROVINCE', 'BARANGAY', 'STREET', 'ROAD', 'AVENUE'
-    ]
-    
-    for line in lines:
-        line_upper = line.upper().strip()
-        
-        # Skip empty or very short lines
-        if len(line_upper) < 5:
-            continue
-            
-        # Skip lines with numbers (license numbers, dates, etc.)
-        if any(char.isdigit() for char in line_upper):
-            continue
-            
-        # Skip lines containing any filter keywords
-        if any(keyword in line_upper for keyword in filter_keywords):
-            continue
-            
-        # Clean the line for final check
-        clean = re.sub(r"[^A-Z\s,]", "", line_upper).strip()
-        
-        # Check if it looks like a name
-        if (5 <= len(clean) <= 50 and 
-            clean.replace(" ", "").replace(",", "").isalpha() and 
-            " " in clean and 
-            len(clean.split()) >= 2):
-            return clean.title()  # Return in proper case
-    
-    return None
-
 def package_name_info(structured_data: Dict[str, str], basic_text: str, fingerprint_info: Optional[dict] = None) -> NameInfo:
+    """Package name information"""
     return NameInfo(
         document_type="Driver's License",
         name=structured_data.get('Name', 'Not Found'),
@@ -442,6 +434,7 @@ def package_name_info(structured_data: Dict[str, str], basic_text: str, fingerpr
 # ============== CAMERA FUNCTIONS ==============
 
 def auto_capture_license_rpi(reference_name: str = "", fingerprint_info: Optional[dict] = None, retry_mode: bool = False) -> Optional[str]:
+    """Auto-capture license using RPi Camera"""
     camera = get_camera()
     if not camera.initialized:
         return None
@@ -595,50 +588,146 @@ def auto_capture_license_rpi(reference_name: str = "", fingerprint_info: Optiona
         safe_delete_temp_file(temp_filename)
         return None
 
-# ============== VERIFICATION FUNCTIONS ==============
+# ============== VERIFICATION WORKFLOWS ==============
+
+def _retake_prompt(expected_name: str, detected_name: str) -> bool:
+    """Simple retake prompt"""
+    print(f"⚠️ Name mismatch: Expected '{expected_name}', found '{detected_name}'")
+    choice = input("Retake photo? (y/n): ").strip().lower()
+    return choice == 'y'
+
+def complete_verification_flow(image_path: str, fingerprint_info: dict, 
+                             helmet_verified: bool = True, 
+                             license_expiration_valid: bool = True) -> bool:
+    """Complete student verification flow"""
+    try:
+        # Extract and process with OCR
+        basic_text = extract_text_from_image(image_path)
+        ocr_lines = [line.strip() for line in basic_text.splitlines() if line.strip()]
+        name_from_ocr, sim_score = find_best_line_match(fingerprint_info['name'], ocr_lines)
+        
+        # Check license document verification
+        keywords_found = _count_verification_keywords(basic_text.upper())
+        license_detected = keywords_found >= 2
+        
+        # Check name matching
+        detected_name = name_from_ocr if name_from_ocr else _detect_name_from_ocr(basic_text, is_guest=False)
+        name_matching_verified = sim_score and sim_score > 0.65 if sim_score else False
+        
+        # Final verification
+        fingerprint_verified = fingerprint_info['confidence'] > 50
+        all_verified = (helmet_verified and fingerprint_verified and 
+                       license_expiration_valid and license_detected and 
+                       name_matching_verified)
+        
+        # Show results
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("🎯 VERIFICATION RESULTS")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print(f"🪖 Helmet: {'✅' if helmet_verified else '❌'}")
+        print(f"🔒 Fingerprint: {'✅' if fingerprint_verified else '❌'} ({fingerprint_info['confidence']}%)")
+        print(f"📅 License Valid: {'✅' if license_expiration_valid else '❌'}")
+        print(f"🆔 License Detected: {'✅' if license_detected else '❌'}")
+        print(f"👤 Name Match: {'✅' if name_matching_verified else '❌'} ({(sim_score or 0)*100:.1f}%)")
+        print(f"🟢 STATUS: {'✅ FULLY VERIFIED' if all_verified else '❌ VERIFICATION FAILED'}")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        
+        return all_verified
+        
+    except Exception:
+        return False
+    finally:
+        safe_delete_temp_file(image_path)
+
+def complete_guest_verification_flow(image_path: str, guest_info: dict,
+                                   helmet_verified: bool = True) -> bool:
+    """Complete guest verification flow"""
+    try:
+        # Extract text and check for license verification
+        basic_text = _extract_text_smart(image_path, is_guest=True)
+        keywords_found = _count_verification_keywords(basic_text.upper())
+        license_detected = keywords_found >= 1
+        
+        guest_verified = helmet_verified and license_detected
+        
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("🎯 GUEST VERIFICATION")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print(f"🪖 Helmet: {'✅' if helmet_verified else '❌'}")
+        print(f"🆔 License: {'✅' if license_detected else '❌'}")
+        print(f"👤 Guest: {guest_info['name']}")
+        print(f"🟢 STATUS: {'✅ GUEST VERIFIED' if guest_verified else '❌ GUEST DENIED'}")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        
+        return guest_verified
+        
+    except Exception:
+        return False
+    finally:
+        safe_delete_temp_file(image_path)
+
+# ============== LEGACY SUPPORT FUNCTIONS ==============
+# These functions maintain compatibility with existing code
+
+def extract_name_from_lines(image_path: str, reference_name: str = "", best_ocr_match: str = "", match_score: float = 0.0) -> Dict[str, str]:
+    """Legacy function for backwards compatibility"""
+    if not reference_name:
+        raw_text = _extract_text_smart(image_path, is_guest=True)
+        keywords_found = _count_verification_keywords(raw_text.upper())
+        doc_status = "Driver's License Detected" if keywords_found >= 1 else "Document Detected"
+        detected_name = _detect_name_from_ocr(raw_text, is_guest=True)
+        
+        return {
+            "Document Verified": doc_status,
+            "Name": detected_name if detected_name else "Guest User",
+            "Matched From": "Simple Guest Extraction"
+        }
+    
+    raw_text = _extract_text_smart(image_path, is_guest=False)
+    keywords_found = _count_verification_keywords(raw_text.upper())
+    doc_status = "Driver's License Detected" if keywords_found >= 2 else "Unverified Document"
+    
+    name_info = {"Document Verified": doc_status}
+    
+    if reference_name and match_score >= 0.65:
+        name_info.update({
+            "Name": reference_name,
+            "Matched From": "Fingerprint Authentication (High Confidence)",
+            "Match Confidence": f"{match_score * 100:.1f}%"
+        })
+    elif best_ocr_match and match_score > 0.50:
+        name_info.update({
+            "Name": best_ocr_match,
+            "Matched From": "Best OCR Line Match",
+            "Match Confidence": f"{match_score * 100:.1f}%"
+        })
+    else:
+        detected_name = _detect_name_from_ocr(raw_text, is_guest=False)
+        if detected_name:
+            name_info.update({"Name": detected_name, "Matched From": "Pattern Detection"})
+        else:
+            name_info["Name"] = "Not Found"
+    
+    return name_info
+
+def extract_guest_name_from_license_simple(image_path: str) -> Dict[str, str]:
+    """Legacy function for backwards compatibility"""
+    return extract_name_from_lines(image_path)
 
 def licenseRead(image_path: str, fingerprint_info: dict) -> NameInfo:
+    """Legacy function for backwards compatibility"""
     reference_name = fingerprint_info['name']
-    current_image_path = image_path
     
     try:
-        while True:
-            basic_text = extract_text_from_image(current_image_path)
-            ocr_lines = [line.strip() for line in basic_text.splitlines() if line.strip()]
-            name_from_ocr, sim_score = find_best_line_match(reference_name, ocr_lines)
-            
-            structured_data = extract_name_from_lines(current_image_path, reference_name, name_from_ocr, sim_score)
-            packaged = package_name_info(structured_data, basic_text, fingerprint_info)
-            packaged.match_score = sim_score
-            
-            detected_name = packaged.name
-            
-            # Check name matching
-            exact_match = (detected_name.lower() == reference_name.lower())
-            high_similarity = sim_score and sim_score >= 0.65
-            
-            ref_words = set(reference_name.lower().split())
-            det_words = set(detected_name.lower().split())
-            word_overlap_ratio = len(ref_words.intersection(det_words)) / len(ref_words) if ref_words else 0
-            substantial_overlap = word_overlap_ratio >= 0.7
-            
-            name_matches = (detected_name != "Not Found" and (exact_match or high_similarity or substantial_overlap))
-            
-            if name_matches:
-                return packaged
-            
-            if not _retake_prompt(reference_name, detected_name):
-                return packaged
-            
-            if current_image_path != image_path:
-                safe_delete_temp_file(current_image_path)
-            
-            retake_image_path = auto_capture_license_rpi(reference_name, fingerprint_info, retry_mode=True)
-            
-            if retake_image_path:
-                current_image_path = retake_image_path
-            else:
-                return packaged
+        basic_text = extract_text_from_image(image_path)
+        ocr_lines = [line.strip() for line in basic_text.splitlines() if line.strip()]
+        name_from_ocr, sim_score = find_best_line_match(reference_name, ocr_lines)
+        
+        structured_data = extract_name_from_lines(image_path, reference_name, name_from_ocr, sim_score)
+        packaged = package_name_info(structured_data, basic_text, fingerprint_info)
+        packaged.match_score = sim_score
+        
+        return packaged
         
     except Exception:
         error_packaged = package_name_info(
@@ -648,61 +737,27 @@ def licenseRead(image_path: str, fingerprint_info: dict) -> NameInfo:
         error_packaged.match_score = 0.0
         return error_packaged
     finally:
-        if current_image_path != image_path:
-            safe_delete_temp_file(current_image_path)
         safe_delete_temp_file(image_path)
 
 def licenseReadGuest(image_path: str, guest_info: dict) -> NameInfo:
-    guest_name = guest_info['name']
-    
+    """Legacy function for backwards compatibility"""
     try:
-        guest_extraction = extract_guest_name_from_license_simple(image_path)
-        detected_name = guest_extraction.get('Name', 'Guest User')
-        document_status = guest_extraction.get('Document Verified', 'Document Detected')
-        
-        final_name = guest_name
-        
-        if detected_name and detected_name != "Guest User" and detected_name != guest_name:
-            final_name = guest_name  # Use provided name for consistency
-        
         basic_text = _extract_text_smart(image_path, is_guest=True)
+        keywords_found = _count_verification_keywords(basic_text.upper())
+        document_status = "Driver's License Detected" if keywords_found >= 1 else "Document Detected"
         
-        packaged = NameInfo(
+        return NameInfo(
             document_type="Driver's License",
-            name=final_name,
+            name=guest_info['name'],
             document_verified=document_status,
             formatted_text=format_text_output(basic_text),
             fingerprint_info=None
         )
 
-        keywords_found = _count_verification_keywords(basic_text.upper())
-        is_verified = keywords_found >= 1
-        
-        if not is_verified and _retake_prompt("Valid License Document", "Insufficient License Keywords"):
-            retake_image_path = auto_capture_license_rpi("Guest License", None, retry_mode=True)
-            
-            if retake_image_path:
-                retake_extraction = extract_guest_name_from_license_simple(retake_image_path)
-                retake_text = _extract_text_smart(retake_image_path, is_guest=True)
-                retake_document_status = retake_extraction.get('Document Verified', 'Document Detected')
-                
-                retake_packaged = NameInfo(
-                    document_type="Driver's License",
-                    name=final_name,
-                    document_verified=retake_document_status,
-                    formatted_text=format_text_output(retake_text),
-                    fingerprint_info=None
-                )
-                
-                safe_delete_temp_file(retake_image_path)
-                return retake_packaged
-        
-        return packaged
-
     except Exception:
         return NameInfo(
             document_type="Driver's License",
-            name=guest_name,
+            name=guest_info['name'],
             document_verified="Processing Failed",
             formatted_text="Processing failed",
             fingerprint_info=None
@@ -711,88 +766,34 @@ def licenseReadGuest(image_path: str, guest_info: dict) -> NameInfo:
         safe_delete_temp_file(image_path)
 
 def get_guest_name_from_license_image(image_path: str) -> str:
+    """Legacy function for backwards compatibility"""
     try:
-        extraction = extract_guest_name_from_license_simple(image_path)
-        detected_name = extraction.get('Name', 'Guest')
-        return detected_name if detected_name and detected_name != "Guest User" else "Guest"
+        raw_text = _extract_text_smart(image_path, is_guest=True)
+        detected_name = _detect_name_from_ocr(raw_text, is_guest=True)
+        return detected_name if detected_name else "Guest"
     except Exception:
         return "Guest"
 
-def _retake_prompt(expected_name: str, detected_name: str) -> bool:
-    print(f"⚠️ Name mismatch: Expected '{expected_name}', found '{detected_name}'")
-    choice = input("Retake photo? (y/n): ").strip().lower()
-    return choice == 'y'
+if __name__ == "__main__":
+    print("🚀 OCR System Ready")
 
-# ============== VERIFICATION FLOWS ==============
-
-def complete_verification_flow(image_path: str, fingerprint_info: dict, 
-                             helmet_verified: bool = True, 
-                             license_expiration_valid: bool = True) -> bool:
-    license_result = licenseRead(image_path, fingerprint_info)
-    
-    final_name = license_result.name
-    final_match_score = license_result.match_score or 0.0
-    final_document_status = license_result.document_verified
-    
-    fingerprint_verified = fingerprint_info['confidence'] > 50
-    license_detected = "Driver's License Detected" in final_document_status
-    name_matching_verified = final_match_score > 0.65
-    
-    all_verified = (helmet_verified and fingerprint_verified and 
-                   license_expiration_valid and license_detected and 
-                   name_matching_verified)
-    
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print("🎯 VERIFICATION RESULTS")
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print(f"🪖 Helmet: {'✅' if helmet_verified else '❌'}")
-    print(f"🔒 Fingerprint: {'✅' if fingerprint_verified else '❌'} ({fingerprint_info['confidence']}%)")
-    print(f"📅 License Valid: {'✅' if license_expiration_valid else '❌'}")
-    print(f"🆔 License Detected: {'✅' if license_detected else '❌'}")
-    print(f"👤 Name Match: {'✅' if name_matching_verified else '❌'} ({final_match_score*100:.1f}%)")
-    print(f"🟢 STATUS: {'✅ FULLY VERIFIED' if all_verified else '❌ VERIFICATION FAILED'}")
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    
-    return all_verified
-
-def complete_guest_verification_flow(image_path: str, guest_info: dict,
-                                   helmet_verified: bool = True) -> bool:
-    license_result = licenseReadGuest(image_path, guest_info)
-    final_document_status = license_result.document_verified
-    license_detected = "Driver's License Detected" in final_document_status
-    
-    guest_verified = helmet_verified and license_detected
-    
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print("🎯 GUEST VERIFICATION")
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print(f"🪖 Helmet: {'✅' if helmet_verified else '❌'}")
-    print(f"🆔 License: {'✅' if license_detected else '❌'}")
-    print(f"👤 Guest: {guest_info['name']}")
-    print(f"🟢 STATUS: {'✅ GUEST VERIFIED' if guest_verified else '❌ GUEST DENIED'}")
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    
-    return guest_verified
-
-# ============== UTILITY FUNCTIONS ==============
-
-def print_summary(packaged: NameInfo, fingerprint_info: Optional[dict] = None, structured_data: Optional[Dict[str, str]] = None, 
-                 is_guest: bool = False, guest_info: Optional[dict] = None) -> None:
-    if structured_data and "Match Confidence" in structured_data:
-        print(f"📄 License processed - Name match: {structured_data['Match Confidence']}")
+# ============== CACHE UTILITY FUNCTIONS ==============
 
 def get_ocr_performance_stats() -> Dict:
+    """Get OCR performance statistics"""
     try:
         cache_files = len([f for f in os.listdir(CACHE_DIR) if f.endswith('.txt')])
         return {
             'cache_files': cache_files,
             'cache_directory': CACHE_DIR,
-            'status': 'Optimized OCR active'
+            'max_cache_files': MAX_CACHE_FILES,
+            'status': 'Cache system active'
         }
     except:
-        return {'status': 'OCR cache not available'}
+        return {'status': 'Cache not available'}
 
 def clear_ocr_cache():
+    """Clear OCR cache"""
     try:
         import shutil
         if os.path.exists(CACHE_DIR):
@@ -801,8 +802,3 @@ def clear_ocr_cache():
         print("✅ OCR cache cleared")
     except Exception as e:
         print(f"⚠️ Cache clear failed: {e}")
-
-if __name__ == "__main__":
-    print("🚀 Optimized OCR System Ready")
-    stats = get_ocr_performance_stats()
-    print("📊 Stats:", stats)

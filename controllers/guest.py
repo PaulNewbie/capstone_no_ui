@@ -1,16 +1,24 @@
-# controllers/guest.py - Simplified Guest Controller with Clean Logging
+# controllers/guest.py - Cleaned and Optimized
 
-from services.license_reader import *
+from services.license_reader import (
+    auto_capture_license_rpi, 
+    extract_text_from_image, 
+    extract_guest_name_from_license,
+    complete_guest_verification_flow
+)
 from services.helmet_infer import verify_helmet
-from services.time_tracker import *
 from services.led_control import *  
-from utils.display_helpers import display_separator, display_verification_result
 from utils.gui_helpers import show_results_gui, get_guest_info_gui, updated_guest_office_gui
+
+# Import database functions
+from database.unified_db import db
+from database.db_operations import record_guest_time_in, record_guest_time_out
+
 import difflib
 import time
 
 def guest_verification():
-    """Main guest verification workflow - simplified logging"""
+    """Main guest verification workflow"""
     print("\n🎫 GUEST VERIFICATION SYSTEM")
     
     set_led_processing()
@@ -36,224 +44,192 @@ def guest_verification():
         return
     
     # Step 3: Extract name and check guest status
-    ocr_preview = extract_text_from_image(image_path)
-    ocr_lines = [line.strip() for line in ocr_preview.splitlines() if line.strip()]
-    detected_name = extract_guest_name_from_license(ocr_lines)
-    
+    detected_name = extract_guest_name_from_license_image(image_path)
     print(f"📄 Detected name: {detected_name}")
     
     current_status, guest_info = get_guest_time_status(detected_name)
     
     if current_status == 'IN':
         # Process TIME OUT
-        print(f"✅ Found guest: {guest_info['name']} ({guest_info['similarity_score']*100:.1f}% match)")
-        print("🔴 TIMING OUT...")
-        print("🛡️ Drive safe!")
-        
-        time_result = process_guest_time_out(guest_info)
-        print(f"🕒 {time_result['message']}")
-        
-        if time_result['success']:
-            set_led_success(duration=5.0)
-        else:
-            set_led_idle()
-        
+        _process_guest_time_out(guest_info, image_path)
     elif current_status == 'OUT' and guest_info is not None:
         # Process returning guest TIME IN
-        print(f"✅ Returning guest: {guest_info['name']} ({guest_info['similarity_score']*100:.1f}% match)")
-        print("🟢 TIMING IN...")
-        
-        # Get updated office info
-        updated_guest_info = updated_guest_office_gui(guest_info['name'], guest_info.get('office', 'CSS Office'))
-        
-        if not updated_guest_info:
-            print("❌ Office update cancelled")
-            set_led_idle()
-            input("\n📱 Press Enter to return...")
-            return
-        
-        existing_guest_info = {
-            'name': updated_guest_info['name'],
-            'plate_number': guest_info['plate_number'],
-            'office': updated_guest_info['office']
-        }
-        
-        guest_data_for_license = {
-            'name': existing_guest_info['name'],
-            'student_id': 'GUEST',
-            'course': 'N/A',
-            'license_number': 'N/A',
-            'license_expiration': 'N/A',
-            'plate_number': existing_guest_info['plate_number'],
-            'office': existing_guest_info['office'],
-            'is_guest': True
-        }
-        
-        # Use the simplified guest verification flow
-        is_guest_verified = complete_guest_verification_flow(
-            image_path=image_path,
-            guest_info=guest_data_for_license,
-            helmet_verified=True
-        )
-        
-        if is_guest_verified:
-            time_result = process_guest_time_in(existing_guest_info)
-            print(f"🕒 {time_result['message']}")
-            
-            if time_result['success']:
-                set_led_success(duration=5.0)
-            else:
-                set_led_idle()
-        else:
-            print("❌ Guest verification failed")
-            set_led_idle()
-        
+        _process_returning_guest_time_in(guest_info, image_path)
     else:
         # New guest TIME IN
-        print("🟢 New guest - TIMING IN...")
-        
-        guest_info_input = get_guest_info_gui(detected_name)
-        
-        if not guest_info_input:
-            print("❌ Guest info cancelled")
-            set_led_idle()
-            input("\n📱 Press Enter to return...")
-            return
-        
-        print(f"✅ Guest info: {guest_info_input['name']} | {guest_info_input['plate_number']} | {guest_info_input['office']}")
-        
-        guest_data_for_license = {
-            'name': guest_info_input['name'],
-            'student_id': 'GUEST',
-            'course': 'N/A',
-            'license_number': 'N/A',
-            'license_expiration': 'N/A',
-            'plate_number': guest_info_input['plate_number'],
-            'office': guest_info_input['office'],
-            'is_guest': True
-        }
-        
-        # Use the simplified guest verification flow
-        is_guest_verified = complete_guest_verification_flow(
-            image_path=image_path,
-            guest_info=guest_data_for_license,
-            helmet_verified=True
-        )
-        
-        if is_guest_verified:
-            time_result = process_guest_time_in(guest_info_input)
-            print(f"🕒 {time_result['message']}")
-            
-            if time_result['success']:
-                set_led_success(duration=5.0)
-            else:
-                set_led_idle()
-        else:
-            print("❌ Guest verification failed")
-            set_led_idle()
+        _process_new_guest_time_in(detected_name, image_path)
     
     input("\n📱 Press Enter to return...")
 
-def extract_guest_name_from_license(ocr_lines):
-    """Extract guest name from license OCR - simplified"""
-    filter_keywords = [
-        'ROAD', 'STREET', 'AVENUE', 'DISTRICT', 'CITY', 'PROVINCE', 'MARILAO', 'BULACAN',
-        'BARANGAY', 'REPUBLIC', 'PHILIPPINES', 'TRANSPORTATION', 
-        'DRIVER', 'LICENSE', 'NATIONALITY', 'ADDRESS', 'WEIGHT', 'HEIGHT'
-    ]
-    
-    potential_names = []
-    
-    for line in ocr_lines:
-        line_clean = line.strip().upper()
-        
-        # Skip invalid lines
-        if (not line_clean or len(line_clean) < 5 or len(line_clean) > 50 or
-            any(keyword in line_clean for keyword in filter_keywords) or
-            any(char.isdigit() for char in line_clean)):
-            continue
-        
-        # Look for name patterns
-        if line_clean.replace(" ", "").replace(",", "").isalpha() and " " in line_clean:
-            score = 0
-            if "," in line_clean: score += 10  # Last, First format
-            word_count = len(line_clean.split())
-            if 2 <= word_count <= 4: score += 5
-            if 10 <= len(line_clean) <= 30: score += 3
-            potential_names.append((line_clean, score))
-    
-    if potential_names:
-        potential_names.sort(key=lambda x: x[1], reverse=True)
-        return potential_names[0][0]
-    
-    return "Guest"
-
-def get_guest_time_status(detected_name, plate_number=None):
-    """Get current time status of guest - simplified logging"""
+def extract_guest_name_from_license_image(image_path: str) -> str:
+    """Simple and reliable guest name extraction - returns SURNAME, FIRSTNAME MIDDLENAME format"""
     try:
-        import sqlite3
-        from difflib import SequenceMatcher
+        import re
+        ocr_text = extract_text_from_image(image_path)
+        lines = [line.strip() for line in ocr_text.splitlines() if line.strip()]
         
-        conn = sqlite3.connect("database/time_tracking.db")
-        cursor = conn.cursor()
+        # Debug: Show what we're working with
+        print("Debug: Checking lines for name:")
+        for i, line in enumerate(lines[:15]):
+            print(f"  Line {i}: {line}")
         
-        # Get latest record for each guest
-        cursor.execute("""
-            SELECT student_name, student_id, status, date, time,
-                   ROW_NUMBER() OVER (PARTITION BY student_id ORDER BY date DESC, time DESC) as row_num
-            FROM time_records 
-            WHERE student_id LIKE 'GUEST_%'
-        """)
+        # Check first 15 lines only
+        for line in lines[:15]:
+            original_line = line.strip()
+            line_clean = line.upper().strip()
+            
+            # Remove common OCR artifacts: leading numbers, dots, special chars
+            line_clean = re.sub(r'^[\d\.\-\s]+', '', line_clean)
+            
+            # Skip empty lines after cleaning
+            if not line_clean or len(line_clean) < 7:
+                continue
+            
+            # Skip if doesn't have exactly one comma
+            if line_clean.count(',') != 1:
+                continue
+            
+            # ADDRESS PATTERNS TO SKIP
+            address_indicators = [
+                'BLK', 'BLOCK', 'LOT', 'PHASE', 'PH', 
+                'STREET', 'ST', 'ROAD', 'RD', 'AVENUE', 'AVE',
+                'BARANGAY', 'BRGY', 'CITY', 'PROVINCE',
+                'UNIT', 'BLDG', 'BUILDING', 'FLOOR', 'FLR',
+                'SUBDIVISION', 'SUBD', 'VILLAGE', 'VILL',
+                'RESIDENCIA', 'RESIDENCE', 'APARTMENT', 'APT',
+                'CONDO', 'CONDOMINIUM', 'TOWNHOUSE',
+                'ZIP', 'POSTAL'
+            ]
+            
+            # Check if line contains address indicators
+            contains_address = any(indicator in line_clean.split() for indicator in address_indicators)
+            if contains_address:
+                print(f"  Skipping address line: {line_clean}")
+                continue
+            
+            # Skip lines with obvious document keywords
+            doc_keywords = [
+                'REPUBLIC', 'PHILIPPINES', 'DEPARTMENT', 'TRANSPORTATION', 
+                'LICENSE', 'DRIVER', 'ADDRESS', 'NATIONALITY', 'OFFICE',
+                'EXPIRATION', 'REGISTRATION', 'RESTRICTION', 'CONDITION'
+            ]
+            if any(keyword in line_clean for keyword in doc_keywords):
+                print(f"  Skipping document line: {line_clean}")
+                continue
+            
+            # Check for number patterns common in addresses
+            # Like "123 STREET" or "BLOCK 13" but not in names
+            if re.search(r'\b\d{2,}\b', line_clean):  # Contains numbers with 2+ digits
+                print(f"  Skipping line with multi-digit numbers: {line_clean}")
+                continue
+            
+            try:
+                # Split by comma
+                parts = line_clean.split(',')
+                if len(parts) != 2:
+                    continue
+                    
+                lastname = parts[0].strip()
+                firstname = parts[1].strip()
+                
+                # Remove any remaining single digits or special chars
+                # But keep spaces and letters
+                lastname_clean = re.sub(r'[^A-Z\s]', '', lastname).strip()
+                firstname_clean = re.sub(r'[^A-Z\s]', '', firstname).strip()
+                
+                # Additional validation for names
+                # Names shouldn't be too short or too long
+                if (not lastname_clean or not firstname_clean or
+                    len(lastname_clean) < 2 or len(firstname_clean) < 2 or
+                    len(lastname_clean) > 20 or len(firstname_clean) > 30):
+                    continue
+                
+                # Check if both parts are valid names (only letters and spaces)
+                if (lastname_clean.replace(' ', '').isalpha() and 
+                    firstname_clean.replace(' ', '').isalpha()):
+                    
+                    # Additional check: Names typically don't have more than 3 words
+                    if (len(lastname_clean.split()) <= 3 and 
+                        len(firstname_clean.split()) <= 4):
+                        
+                        print(f"  Found name: {lastname_clean}, {firstname_clean}")
+                        # Return in SURNAME, FIRSTNAME MIDDLENAME format (all uppercase)
+                        return f"{lastname_clean}, {firstname_clean}"
+                    
+            except Exception as e:
+                print(f"  Error processing line '{line}': {e}")
+                continue
         
-        all_records = cursor.fetchall()
-        conn.close()
+        print("  No valid name found, returning 'Guest'")
+        return "Guest"
         
-        # Filter to latest records only
-        latest_records = [record for record in all_records if record[5] == 1]
+    except Exception as e:
+        print(f"Error in extract_guest_name_from_license_image: {e}")
+        return "Guest"
+              
+def get_guest_time_status(detected_name, plate_number=None):
+    """Get current time status of guest"""
+    try:
+        # Get all people currently inside
+        people_inside = db.get_people_currently_inside('GUEST')
         
-        if not latest_records:
-            return None, None
+        # Check people currently inside first
+        for person in people_inside:
+            guest_name = person['person_name']
+            similarity = _calculate_name_similarity(detected_name, guest_name)
+            
+            if similarity > 0.6:
+                guest_id = person['person_id']
+                guest_details = db.get_guest(guest_id=guest_id)
+                
+                if guest_details:
+                    guest_info = {
+                        'name': guest_details['full_name'],
+                        'student_id': guest_id,
+                        'plate_number': guest_details['plate_number'],
+                        'office': guest_details['office_visiting'],
+                        'current_status': 'IN',
+                        'similarity_score': similarity
+                    }
+                    return 'IN', guest_info
         
-        print(f"🔍 Checking against {len(latest_records)} guest records...")
+        # Check recent records for returning guests
+        recent_records = db.get_time_records(person_type='GUEST', limit=50)
+        guest_records = {}
         
-        # Find best name match
+        for record in recent_records:
+            guest_id = record['person_id']
+            if guest_id not in guest_records:
+                guest_records[guest_id] = {
+                    'name': record['person_name'],
+                    'last_action': record['action'],
+                    'timestamp': record['timestamp']
+                }
+        
+        # Find best match among recent guests
         best_match = None
         highest_similarity = 0.0
         
-        for record in latest_records:
-            guest_name = record[0]
-            
-            # Calculate similarity
-            similarity = SequenceMatcher(None, detected_name.upper(), guest_name.upper()).ratio()
-            
-            # Boost for substring matches
-            if (detected_name.upper() in guest_name.upper() or 
-                guest_name.upper() in detected_name.upper()):
-                similarity = max(similarity, 0.8)
-            
-            # Boost for plate match if provided
-            if plate_number:
-                guest_plate = record[1].replace('GUEST_', '')
-                if plate_number.upper() == guest_plate.upper():
-                    similarity = max(similarity, 0.9)
+        for guest_id, record in guest_records.items():
+            guest_name = record['name']
+            similarity = _calculate_name_similarity(detected_name, guest_name)
             
             if similarity > highest_similarity and similarity > 0.6:
                 highest_similarity = similarity
-                best_match = record
+                guest_details = db.get_guest(guest_id=guest_id)
+                
+                if guest_details:
+                    best_match = {
+                        'name': guest_details['full_name'],
+                        'student_id': guest_id,
+                        'plate_number': guest_details['plate_number'],
+                        'office': guest_details['office_visiting'],
+                        'current_status': record['last_action'],
+                        'similarity_score': similarity
+                    }
         
         if best_match:
-            guest_info = {
-                'name': best_match[0],
-                'student_id': best_match[1],
-                'plate_number': best_match[1].replace('GUEST_', ''),
-                'office': 'Previous Visit',
-                'current_status': best_match[2],
-                'last_date': best_match[3],
-                'last_time': best_match[4],
-                'similarity_score': highest_similarity
-            }
-            
-            return best_match[2], guest_info
+            return best_match['current_status'], best_match
         
         return None, None
         
@@ -261,50 +237,149 @@ def get_guest_time_status(detected_name, plate_number=None):
         print(f"❌ Error checking guest status: {e}")
         return None, None
 
-def create_guest_time_data(guest_info):
-    """Create standardized guest data for time tracking"""
-    return {
-        'name': guest_info['name'],
-        'student_id': f"GUEST_{guest_info['plate_number']}",
-        'course': f"Guest - {guest_info['office']}",
-        'license_number': guest_info['plate_number'],
-        'confidence': 100
+def _calculate_name_similarity(detected_name: str, guest_name: str) -> float:
+    """Calculate similarity between two names"""
+    similarity = difflib.SequenceMatcher(None, detected_name.upper(), guest_name.upper()).ratio()
+    
+    # Boost for substring matches
+    if (detected_name.upper() in guest_name.upper() or 
+        guest_name.upper() in detected_name.upper()):
+        similarity = max(similarity, 0.8)
+    
+    return similarity
+
+def _process_guest_time_out(guest_info, image_path):
+    """Process guest time out"""
+    print(f"✅ Found guest: {guest_info['name']} ({guest_info['similarity_score']*100:.1f}% match)")
+    print("🔴 TIMING OUT...")
+    print("🛡️ Drive safe!")
+    
+    time_result = _record_guest_time_out(guest_info)
+    print(f"🕒 {time_result['message']}")
+    
+    if time_result['success']:
+        set_led_success(duration=5.0)
+    else:
+        set_led_idle()
+
+def _process_returning_guest_time_in(guest_info, image_path):
+    """Process returning guest time in"""
+    print(f"✅ Returning guest: {guest_info['name']} ({guest_info['similarity_score']*100:.1f}% match)")
+    print("🟢 TIMING IN...")
+    
+    # Get updated office info
+    updated_guest_info = updated_guest_office_gui(guest_info['name'], guest_info.get('office', 'CSS Office'))
+    
+    if not updated_guest_info:
+        print("❌ Office update cancelled")
+        set_led_idle()
+        return
+    
+    guest_data = {
+        'name': updated_guest_info['name'],
+        'plate_number': guest_info['plate_number'],
+        'office': updated_guest_info['office'],
+        'is_guest': True
     }
-
-def process_guest_time_in(guest_info):
-    """Process guest time in - simplified"""
-    guest_time_data = create_guest_time_data(guest_info)
     
-    if record_time_in(guest_time_data):
-        return {
-            'success': True,
-            'status': "✅ GUEST TIME IN SUCCESSFUL",
-            'message': f"✅ TIME IN SUCCESSFUL - {time.strftime('%H:%M:%S')}",
-            'color': "🟢"
-        }
+    # Verify license
+    is_verified = complete_guest_verification_flow(
+        image_path=image_path,
+        guest_info=guest_data,
+        helmet_verified=True
+    )
+    
+    if is_verified:
+        time_result = _record_guest_time_in(guest_data)
+        print(f"🕒 {time_result['message']}")
+        
+        if time_result['success']:
+            set_led_success(duration=5.0)
+        else:
+            set_led_idle()
     else:
+        print("❌ Guest verification failed")
+        set_led_idle()
+
+def _process_new_guest_time_in(detected_name, image_path):
+    """Process new guest time in"""
+    print("🟢 New guest - TIMING IN...")
+    
+    guest_info_input = get_guest_info_gui(detected_name)
+    
+    if not guest_info_input:
+        print("❌ Guest info cancelled")
+        set_led_idle()
+        return
+    
+    print(f"✅ Guest info: {guest_info_input['name']} | {guest_info_input['plate_number']} | {guest_info_input['office']}")
+    
+    guest_data = {
+        'name': guest_info_input['name'],
+        'plate_number': guest_info_input['plate_number'],
+        'office': guest_info_input['office'],
+        'is_guest': True
+    }
+    
+    # Verify license
+    is_verified = complete_guest_verification_flow(
+        image_path=image_path,
+        guest_info=guest_data,
+        helmet_verified=True
+    )
+    
+    if is_verified:
+        time_result = _record_guest_time_in(guest_data)
+        print(f"🕒 {time_result['message']}")
+        
+        if time_result['success']:
+            set_led_success(duration=5.0)
+        else:
+            set_led_idle()
+    else:
+        print("❌ Guest verification failed")
+        set_led_idle()
+
+def _record_guest_time_in(guest_info):
+    """Record guest time in"""
+    try:
+        success = record_guest_time_in(guest_info)
+        
+        if success:
+            return {
+                'success': True,
+                'message': f"✅ TIME IN SUCCESSFUL - {time.strftime('%H:%M:%S')}"
+            }
+        else:
+            return {
+                'success': False,
+                'message': "❌ Failed to record TIME IN"
+            }
+    except Exception as e:
+        print(f"❌ Error processing guest time in: {e}")
         return {
             'success': False,
-            'status': "❌ TIME IN FAILED",
-            'message': "❌ Failed to record TIME IN",
-            'color': "🔴"
+            'message': f"❌ Error: {e}"
         }
 
-def process_guest_time_out(guest_info):
-    """Process guest time out - simplified"""
-    guest_time_data = create_guest_time_data(guest_info)
-    
-    if record_time_out(guest_time_data):
-        return {
-            'success': True,
-            'status': "✅ GUEST TIME OUT SUCCESSFUL",
-            'message': f"✅ TIME OUT SUCCESSFUL - {time.strftime('%H:%M:%S')}",
-            'color': "🟢"
-        }
-    else:
+def _record_guest_time_out(guest_info):
+    """Record guest time out"""
+    try:
+        success = record_guest_time_out(guest_info)
+        
+        if success:
+            return {
+                'success': True,
+                'message': f"✅ TIME OUT SUCCESSFUL - {time.strftime('%H:%M:%S')}"
+            }
+        else:
+            return {
+                'success': False,
+                'message': "❌ Failed to record TIME OUT"
+            }
+    except Exception as e:
+        print(f"❌ Error processing guest time out: {e}")
         return {
             'success': False,
-            'status': "❌ TIME OUT FAILED",
-            'message': "❌ Failed to record TIME OUT",
-            'color': "🔴"
+            'message': f"❌ Error: {e}"
         }

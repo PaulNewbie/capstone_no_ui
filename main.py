@@ -17,7 +17,9 @@ from services.led_control import (
     set_led_idle, 
     cleanup_led_system
 )
-from database.db_operations import initialize_all_databases
+
+# Database
+from database.unified_db import *
 
 def initialize_system():
     """Initialize system components"""

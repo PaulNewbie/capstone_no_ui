@@ -187,26 +187,11 @@ class MotorPassGUI:
     def get_current_time_in_count(self):
         """Get count of people currently timed in"""
         try:
-            conn = sqlite3.connect("database/time_tracking.db")
-            cursor = conn.cursor()
+            from database.unified_db import db
             
-            # Get the latest status for each person
-            cursor.execute("""
-                SELECT student_id, status, 
-                       ROW_NUMBER() OVER (PARTITION BY student_id ORDER BY timestamp DESC) as row_num
-                FROM time_records
-            """)
-            
-            all_records = cursor.fetchall()
-            conn.close()
-            
-            # Count people with status 'IN' in their latest record
-            in_count = 0
-            for record in all_records:
-                if record[2] == 1 and record[1] == 'IN':  # Latest record and status is IN
-                    in_count += 1
-            
-            return in_count
+            # Get count of people currently inside using new database
+            people_inside = db.get_people_currently_inside()
+            return len(people_inside)
             
         except Exception as e:
             print(f"Error getting time-in count: {e}")

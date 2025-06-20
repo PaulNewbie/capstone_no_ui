@@ -1,7 +1,7 @@
-# controllers/student.py - Simplified with Clean Logging
+# controllers/student.py - Cleaned and Optimized
 
 from services.fingerprint import authenticate_fingerprint
-from services.license_reader import *
+from services.license_reader import auto_capture_license_rpi, complete_verification_flow
 from services.helmet_infer import verify_helmet
 from services.led_control import *
 
@@ -12,26 +12,24 @@ from database.db_operations import (
     record_time_out
 )
 
-from utils.display_helpers import display_separator, display_verification_result
-from utils.gui_helpers import show_results_gui
-
 import time
 from datetime import datetime
 
 def student_verification():
-    """Main student verification workflow with integrated time tracking and LED status"""
+    """Main student verification workflow with integrated time tracking"""
     print("\n🎓 STUDENT VERIFICATION & TIME TRACKING SYSTEM")
     
-    # Set LED to processing state when student verification starts
     set_led_processing()
     
-    # Step 1: Helmet verification (always required)
+    # Step 1: Helmet verification
     print("🪖 Checking helmet...")
-    if not verify_helmet_check():
+    if not verify_helmet():
         print("❌ Helmet verification failed")
         set_led_idle()
         input("\n📱 Press Enter to return to main menu...")
         return
+    
+    print("✅ Helmet verified")
     
     # Step 2: Fingerprint authentication
     print("🔒 Place your finger on the sensor...")
@@ -45,66 +43,74 @@ def student_verification():
     
     print(f"✅ {student_info['name']} (ID: {student_info['student_id']})")
     
-    # Step 3: Check current time status first
+    # Step 3: Check current time status
     current_status = get_student_time_status(student_info['student_id'])
-    
-    # Step 4: License expiration check (only for TIME IN)
-    if current_status == 'OUT' or current_status is None:
-        license_expiration_valid = check_license_expiration(student_info)
-        if not license_expiration_valid:
-            print("❌ License expired")
-            set_led_idle()
-            input("\n📱 Press Enter to return to main menu...")
-            return
     
     if current_status == 'OUT' or current_status is None:
         # Student is timing IN - full verification required
-        print("🟢 TIMING IN - Starting license verification...")
-        
-        # Capture and verify license
-        image_path = auto_capture_license_rpi(reference_name=student_info['name'], 
-                                           fingerprint_info=student_info)
-        
-        if not image_path:
-            print("❌ License capture failed")
-            set_led_idle()
-            input("\n📱 Press Enter to return to main menu...")
-            return
-        
-        is_fully_verified = complete_verification_flow(
-            image_path=image_path,
-            fingerprint_info=student_info,
-            helmet_verified=True,
-            license_expiration_valid=license_expiration_valid
-        )
-        
-        if is_fully_verified:
-            if record_time_in(student_info):
-                print(f"✅ TIME IN SUCCESSFUL - {time.strftime('%H:%M:%S')}")
-                set_led_success(duration=5.0)
-            else:
-                print("❌ Failed to record TIME IN")
-                set_led_idle()
-        else:
-            print("❌ VERIFICATION INCOMPLETE - TIME IN DENIED")
-            set_led_idle()
-        
+        _process_student_time_in(student_info)
     else:
-        # Student is timing OUT - only helmet + fingerprint required
-        print("🔴 TIMING OUT...")
-        print("🛡️ Drive safe!")
-        
-        if record_time_out(student_info):
-            print(f"✅ TIME OUT SUCCESSFUL - {time.strftime('%H:%M:%S')}")
-            set_led_success(duration=5.0)
-        else:
-            print("❌ Failed to record TIME OUT")
-            set_led_idle()
+        # Student is timing OUT - simplified process
+        _process_student_time_out(student_info)
     
     input("\n📱 Press Enter to return to main menu...")
 
-def check_license_expiration(student_info):
-    """Check if student's license is expired - simplified logging"""
+def _process_student_time_in(student_info):
+    """Process student time in with full verification"""
+    print("🟢 TIMING IN - Starting license verification...")
+    
+    # Step 1: License expiration check
+    license_expiration_valid = _check_license_expiration(student_info)
+    if not license_expiration_valid:
+        print("❌ License expired")
+        set_led_idle()
+        return
+    
+    # Step 2: Capture and verify license
+    image_path = auto_capture_license_rpi(
+        reference_name=student_info['name'], 
+        fingerprint_info=student_info
+    )
+    
+    if not image_path:
+        print("❌ License capture failed")
+        set_led_idle()
+        return
+    
+    # Step 3: Complete verification
+    is_fully_verified = complete_verification_flow(
+        image_path=image_path,
+        fingerprint_info=student_info,
+        helmet_verified=True,
+        license_expiration_valid=license_expiration_valid
+    )
+    
+    # Step 4: Record time in if verified
+    if is_fully_verified:
+        if record_time_in(student_info):
+            print(f"✅ TIME IN SUCCESSFUL - {time.strftime('%H:%M:%S')}")
+            set_led_success(duration=5.0)
+        else:
+            print("❌ Failed to record TIME IN")
+            set_led_idle()
+    else:
+        print("❌ VERIFICATION INCOMPLETE - TIME IN DENIED")
+        set_led_idle()
+
+def _process_student_time_out(student_info):
+    """Process student time out - simplified"""
+    print("🔴 TIMING OUT...")
+    print("🛡️ Drive safe!")
+    
+    if record_time_out(student_info):
+        print(f"✅ TIME OUT SUCCESSFUL - {time.strftime('%H:%M:%S')}")
+        set_led_success(duration=5.0)
+    else:
+        print("❌ Failed to record TIME OUT")
+        set_led_idle()
+
+def _check_license_expiration(student_info):
+    """Check if student's license is expired"""
     try:
         expiration_date_str = student_info.get('license_expiration', '')
         
@@ -141,64 +147,3 @@ def check_license_expiration(student_info):
     except Exception as e:
         print(f"❌ Error checking license: {e}")
         return False
-
-def verify_helmet_check():
-    """Verify helmet is being worn - simplified"""
-    if not verify_helmet():
-        return False
-    print("✅ Helmet verified")
-    return True
-
-# =================== GUEST VERIFICATION FUNCTION ===================
-
-def guest_verification():
-    """Guest verification workflow - simplified"""
-    print("\n🎫 GUEST VERIFICATION SYSTEM")
-    
-    set_led_processing()
-    
-    # Step 1: Helmet verification
-    print("🪖 Checking helmet...")
-    if not verify_helmet_check():
-        print("❌ Helmet verification failed")
-        set_led_idle()
-        input("\n📱 Press Enter to return to main menu...")
-        return
-    
-    # Step 2: Get guest information
-    guest_info = {
-        'name': input("👤 Enter guest name: ").strip(),
-        'plate_number': input("🚗 Enter vehicle plate number: ").strip(),
-        'office': input("🏢 Enter office/purpose: ").strip()
-    }
-    
-    if not all(guest_info.values()):
-        print("❌ All guest information is required")
-        set_led_idle()
-        input("\n📱 Press Enter to return to main menu...")
-        return
-    
-    # Step 3: License verification
-    print("📄 Starting license verification...")
-    image_path = auto_capture_license_rpi("Guest License")
-    
-    if not image_path:
-        print("❌ License capture failed")
-        set_led_idle()
-        input("\n📱 Press Enter to return to main menu...")
-        return
-    
-    is_guest_verified = complete_guest_verification_flow(
-        image_path=image_path,
-        guest_info=guest_info,
-        helmet_verified=True
-    )
-    
-    if is_guest_verified:
-        print("✅ GUEST ACCESS GRANTED")
-        set_led_success(duration=5.0)
-    else:
-        print("❌ GUEST ACCESS DENIED")
-        set_led_idle()
-    
-    input("\n📱 Press Enter to return to main menu...")
