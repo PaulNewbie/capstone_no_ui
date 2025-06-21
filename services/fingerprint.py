@@ -1,4 +1,4 @@
-# services/fingerprint.py - Fixed with Unified Database Integration
+# services/fingerprint.py - Updated with Automated Slot Assignment
 
 import time
 import serial
@@ -8,7 +8,7 @@ import os
 import tkinter as tk
 from tkinter import simpledialog, messagebox
 
-# Import database operations - FIXED to use unified database
+# Import database operations
 from database.db_operations import (
     get_student_by_id,
     get_student_time_status,
@@ -20,7 +20,7 @@ from database.db_operations import (
     get_students_currently_in
 )
 
-# FIXED: Import unified database for student management
+# Import unified database for student management
 from database.unified_db import db
 
 # =================== SETUP ===================
@@ -29,6 +29,26 @@ finger = adafruit_fingerprint.Adafruit_Fingerprint(uart)
 
 # File paths
 FINGERPRINT_DATA_FILE = "json_folder/fingerprint_database.json"
+
+# =================== AUTOMATED SLOT ASSIGNMENT ===================
+
+def find_next_available_slot():
+    """Find next available fingerprint slot automatically"""
+    try:
+        # Start from slot 2 (skip admin slot 1)
+        for slot in range(2, finger.library_size):
+            # Try to read template at this slot
+            if finger.load_model(slot) != adafruit_fingerprint.OK:
+                # Slot is empty
+                print(f"📍 Auto-assigned slot: #{slot}")
+                return slot
+        
+        print("❌ All slots occupied")
+        return None
+        
+    except Exception as e:
+        print(f"❌ Error finding slot: {e}")
+        return None
 
 # =================== JSON DATABASE FUNCTIONS ===================
 
@@ -75,7 +95,7 @@ def get_student_id_gui():
         
         student_id = student_id.strip()
         
-        # FIXED: Get student from unified database
+        # Get student from unified database
         student_info = db.get_student(student_id=student_id)
         
         if student_info:
@@ -163,17 +183,25 @@ def _process_fingerprint_template(template_num):
     print("✅")
     return True
 
-# =================== FINGERPRINT FUNCTIONS ===================
+# =================== MAIN FINGERPRINT FUNCTIONS ===================
 
-def enroll_finger_with_student_info(location):
-    """FIXED: Enhanced enrollment using unified database"""
-    print(f"\n🔒 Starting enrollment for slot #{location}")
+def enroll_finger_with_student_info(location=None):
+    """Enhanced enrollment with automatic slot assignment"""
     
+    # Get student info first
     student_info = get_student_id_gui()
     if not student_info:
         print("❌ No student selected.")
         return False
     
+    # Auto-assign slot if not provided
+    if location is None:
+        location = find_next_available_slot()
+        if location is None:
+            print("❌ No available slots for enrollment")
+            return False
+    
+    print(f"\n🔒 Starting enrollment for slot #{location}")
     display_student_info(student_info)
     print(f"👤 Enrolling: {student_info['full_name']}")
     
@@ -230,7 +258,7 @@ def enroll_finger_with_student_info(location):
     if finger.store_model(location) == adafruit_fingerprint.OK:
         print("✅")
         
-        # FIXED: Update unified database with fingerprint slot
+        # Update unified database with fingerprint slot
         db.update_student(
             student_id=student_info['student_id'],
             fingerprint_slot=location
@@ -271,7 +299,7 @@ Enrollment Successful! ✅
         return False
 
 def authenticate_fingerprint(max_attempts=3):
-    """FIXED: Authenticate fingerprint using unified database"""
+    """Authenticate fingerprint using unified database"""
     attempts = 0
     
     while attempts < max_attempts:
@@ -312,7 +340,7 @@ def authenticate_fingerprint(max_attempts=3):
         # Authentication successful - get student info from unified database
         fingerprint_slot = finger.finger_id
         
-        # FIXED: Get student from unified database by fingerprint slot
+        # Get student from unified database by fingerprint slot
         student_db_info = db.get_student(fingerprint_slot=fingerprint_slot)
         
         if student_db_info:

@@ -1,4 +1,4 @@
-# controllers/admin.py - Fixed with Unified Database Sync
+# controllers/admin.py - Updated with Automated Slot Assignment
 
 from config import ADMIN_MENU
 from services.fingerprint import *
@@ -11,15 +11,14 @@ from database.db_operations import (
     backup_databases
 )
 
-# FIXED: Import unified database for sync
+# Import unified database for sync
 from database.unified_db import db
 
 from utils.display_helpers import (
-	display_menu, 
-	get_user_input, 
-	confirm_action, 
-	display_separator, 
-	get_num 
+    display_menu, 
+    get_user_input, 
+    confirm_action, 
+    display_separator
 )
 
 import time
@@ -162,26 +161,22 @@ def authenticate_admin():
         return False
 
 # =================== ADMIN FUNCTIONS ===================
+
 def admin_enroll():
-    """Enroll new student"""
+    """Enroll new student with automatic slot assignment"""
     if finger.read_templates() != adafruit_fingerprint.OK:
         print("❌ Failed to read templates")
         return
     
     print(f"📊 Current enrollments: {finger.template_count}")
-
-    # Get slot (skip admin slot 1)
-    location = get_num(finger.library_size)
-    if location == 1:
-        print("❌ Slot #1 reserved for admin. Use slot 2+")
-        return
+    print("🤖 Auto-assigning next available slot...")
     
-    success = enroll_finger_with_student_info(location)
-    print(f"{'✅ Success!' if success else '❌ Failed.'}")
+    # Automatically enroll with next available slot
+    success = enroll_finger_with_student_info()
+    print(f"{'✅ Enrollment complete!' if success else '❌ Enrollment failed.'}")
 
 def admin_view_enrolled():
     """Display all enrolled students from UNIFIED database"""
-    # FIXED: Get students from unified database instead of JSON
     students = db.get_all_students()
     
     if not students:
@@ -286,7 +281,7 @@ def admin_reset_all():
         print(f"❌ Reset error: {e}")
 
 def admin_sync_database():
-    """FIXED: Sync database from Google Sheets to UNIFIED database"""
+    """Sync database from Google Sheets to UNIFIED database"""
     print("\n☁️  GOOGLE SHEETS SYNC TO UNIFIED DATABASE")
     print("="*50)
     
@@ -423,9 +418,20 @@ def admin_show_sync_status():
     # Check fingerprint associations
     associated_count = len([s for s in db_students if s.get('fingerprint_slot')])
     
+    # Check available slots
+    available_slots = []
+    try:
+        for slot in range(2, finger.library_size):
+            if finger.load_model(slot) != adafruit_fingerprint.OK:
+                available_slots.append(slot)
+    except:
+        pass
+    
     print(f"📄 JSON Fingerprint Database: {json_count} students")
     print(f"🗄️  Unified Database: {db_count} students")
     print(f"🔗 With Fingerprint Association: {associated_count} students")
+    print(f"📍 Available Slots: {len(available_slots)} slots")
+    print(f"   Next available: {available_slots[0] if available_slots else 'None'}")
     
     if json_count != associated_count:
         print(f"\n⚠️  SYNC NEEDED: {abs(json_count - associated_count)} students not synchronized")

@@ -1,4 +1,4 @@
-# dashboard/app.py - Fixed MotorPass Admin Dashboard
+# dashboard/app.py - Fixed MotorPass Admin Dashboard with Enhanced Reports
 
 from flask import Flask, render_template, jsonify, request, session, redirect, url_for
 from flask_cors import CORS
@@ -186,23 +186,55 @@ def get_time_records():
 @app.route('/reports')
 @login_required
 def reports():
-    """Reports page"""
+    """Reports page - ENHANCED with course statistics"""
     return render_template('reports.html',
                          system_name=SYSTEM_NAME)
+
+# ===== NEW REPORTS API ENDPOINTS =====
+
+@app.route('/api/courses')
+@login_required
+def get_courses():
+    """Get available courses for filtering"""
+    try:
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT DISTINCT course 
+            FROM students 
+            WHERE course IS NOT NULL AND course != '' AND is_active = 1
+            ORDER BY course
+        ''')
+        
+        courses = [row['course'] for row in cursor.fetchall()]
+        conn.close()
+        
+        return jsonify({'success': True, 'courses': courses})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/generate-report')
 @login_required
 def generate_report():
-    """Generate report"""
+    """Generate enhanced reports with course statistics"""
     try:
         report_type = request.args.get('type', 'daily')
-        target_date = request.args.get('date')
+        target_date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
+        course_filter = request.args.get('course')
         
         if report_type == 'daily':
-            report_data = db.generate_daily_report(target_date)
+            report_data = generate_daily_report(target_date, course_filter)
+        elif report_type == 'course':
+            report_data = generate_course_report(target_date)
+        elif report_type == 'weekly':
+            report_data = generate_weekly_report(target_date)
+        elif report_type == 'monthly':
+            report_data = generate_monthly_report(target_date)
         else:
-            # Add other report types here
-            report_data = {}
+            # Fallback to original simple report
+            report_data = db.generate_daily_report(target_date)
         
         return jsonify({
             'success': True,
@@ -215,6 +247,237 @@ def generate_report():
             'error': str(e)
         })
 
+def generate_daily_report(target_date, course_filter=None):
+    """Enhanced daily report with course filtering"""
+    conn = db.get_connection()
+    try:
+        cursor = conn.cursor()
+        
+        # Base query with optional course filter
+        if course_filter:
+            student_query = '''
+                SELECT tr.action, COUNT(*) as count
+                FROM time_records tr
+                JOIN students s ON tr.person_id = s.student_id
+                WHERE tr.date = ? AND tr.person_type = 'STUDENT' AND s.course = ?
+                GROUP BY tr.action
+            '''
+            cursor.execute(student_query, (target_date, course_filter))
+        else:
+            cursor.execute('''
+                SELECT action, COUNT(*) as count
+                FROM time_records 
+                WHERE date = ? AND person_type = 'STUDENT'
+                GROUP BY action
+            ''', (target_date,))
+        
+        student_actions = {row['action']: row['count'] for row in cursor.fetchall()}
+        
+        # Guest actions (no course filter)
+        cursor.execute('''
+            SELECT action, COUNT(*) as count
+            FROM time_records 
+            WHERE date = ? AND person_type = 'GUEST'
+            GROUP BY action
+        ''', (target_date,))
+        
+        guest_actions = {row['action']: row['count'] for row in cursor.fetchall()}
+        
+        # Currently inside with course filter
+        if course_filter:
+            cursor.execute('''
+                SELECT COUNT(*) as count
+                FROM current_status cs
+                JOIN students s ON cs.person_id = s.student_id
+                WHERE cs.current_status = 'IN' AND cs.person_type = 'STUDENT' AND s.course = ?
+            ''', (course_filter,))
+        else:
+            cursor.execute('''
+                SELECT COUNT(*) as count
+                FROM current_status 
+                WHERE current_status = 'IN' AND person_type = 'STUDENT'
+            ''')
+        
+        students_inside = cursor.fetchone()['count']
+        
+        cursor.execute('''
+            SELECT COUNT(*) as count
+            FROM current_status 
+            WHERE current_status = 'IN' AND person_type = 'GUEST'
+        ''')
+        guests_inside = cursor.fetchone()['count']
+        
+        return {
+            'date': target_date,
+            'course_filter': course_filter,
+            'students': {
+                'time_in': student_actions.get('IN', 0),
+                'time_out': student_actions.get('OUT', 0),
+                'currently_inside': students_inside
+            },
+            'guests': {
+                'time_in': guest_actions.get('IN', 0),
+                'time_out': guest_actions.get('OUT', 0),
+                'currently_inside': guests_inside
+            },
+            'total_currently_inside': students_inside + guests_inside
+        }
+        
+    finally:
+        conn.close()
+
+def generate_course_report(target_date):
+    """Generate course statistics report"""
+    conn = db.get_connection()
+    try:
+        cursor = conn.cursor()
+        
+        # Get course statistics
+        cursor.execute('''
+            SELECT 
+                s.course,
+                COUNT(DISTINCT s.student_id) as total_students,
+                COALESCE(today_in.count, 0) as time_in,
+                COALESCE(today_out.count, 0) as time_out,
+                COALESCE(inside.count, 0) as currently_inside
+            FROM students s
+            LEFT JOIN (
+                SELECT s2.course, COUNT(*) as count
+                FROM time_records tr
+                JOIN students s2 ON tr.person_id = s2.student_id
+                WHERE tr.date = ? AND tr.action = 'IN' AND tr.person_type = 'STUDENT'
+                GROUP BY s2.course
+            ) today_in ON s.course = today_in.course
+            LEFT JOIN (
+                SELECT s2.course, COUNT(*) as count
+                FROM time_records tr
+                JOIN students s2 ON tr.person_id = s2.student_id
+                WHERE tr.date = ? AND tr.action = 'OUT' AND tr.person_type = 'STUDENT'
+                GROUP BY s2.course
+            ) today_out ON s.course = today_out.course
+            LEFT JOIN (
+                SELECT s2.course, COUNT(*) as count
+                FROM current_status cs
+                JOIN students s2 ON cs.person_id = s2.student_id
+                WHERE cs.current_status = 'IN' AND cs.person_type = 'STUDENT'
+                GROUP BY s2.course
+            ) inside ON s.course = inside.course
+            WHERE s.course IS NOT NULL AND s.course != '' AND s.is_active = 1
+            GROUP BY s.course
+            ORDER BY s.course
+        ''', (target_date, target_date))
+        
+        course_details = []
+        for row in cursor.fetchall():
+            course_details.append({
+                'course_name': row['course'],
+                'total_students': row['total_students'],
+                'time_in': row['time_in'],
+                'time_out': row['time_out'],
+                'currently_inside': row['currently_inside']
+            })
+        
+        return {
+            'date': target_date,
+            'course_details': course_details,
+            'total_courses': len(course_details)
+        }
+        
+    finally:
+        conn.close()
+
+def generate_weekly_report(target_date):
+    """Generate weekly summary"""
+    target_dt = datetime.strptime(target_date, '%Y-%m-%d')
+    week_start = target_dt - timedelta(days=target_dt.weekday())
+    week_end = week_start + timedelta(days=6)
+    
+    conn = db.get_connection()
+    try:
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT COUNT(*) as count
+            FROM time_records
+            WHERE date BETWEEN ? AND ?
+        ''', (week_start.strftime('%Y-%m-%d'), week_end.strftime('%Y-%m-%d')))
+        
+        total_activities = cursor.fetchone()['count']
+        
+        cursor.execute('''
+            SELECT COUNT(DISTINCT person_id) as count
+            FROM time_records
+            WHERE date BETWEEN ? AND ? AND person_type = 'STUDENT'
+        ''', (week_start.strftime('%Y-%m-%d'), week_end.strftime('%Y-%m-%d')))
+        
+        unique_students = cursor.fetchone()['count']
+        
+        cursor.execute('''
+            SELECT COUNT(DISTINCT person_id) as count
+            FROM time_records
+            WHERE date BETWEEN ? AND ? AND person_type = 'GUEST'
+        ''', (week_start.strftime('%Y-%m-%d'), week_end.strftime('%Y-%m-%d')))
+        
+        unique_guests = cursor.fetchone()['count']
+        
+        return {
+            'week': f"{week_start.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}",
+            'total_activities': total_activities,
+            'unique_students': unique_students,
+            'unique_guests': unique_guests
+        }
+        
+    finally:
+        conn.close()
+
+def generate_monthly_report(target_date):
+    """Generate monthly summary"""
+    target_dt = datetime.strptime(target_date, '%Y-%m-%d')
+    month_start = target_dt.replace(day=1)
+    
+    if month_start.month == 12:
+        month_end = month_start.replace(year=month_start.year + 1, month=1) - timedelta(days=1)
+    else:
+        month_end = month_start.replace(month=month_start.month + 1) - timedelta(days=1)
+    
+    conn = db.get_connection()
+    try:
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT COUNT(*) as count
+            FROM time_records
+            WHERE date BETWEEN ? AND ?
+        ''', (month_start.strftime('%Y-%m-%d'), month_end.strftime('%Y-%m-%d')))
+        
+        total_activities = cursor.fetchone()['count']
+        
+        cursor.execute('''
+            SELECT COUNT(DISTINCT person_id) as count
+            FROM time_records
+            WHERE date BETWEEN ? AND ? AND person_type = 'STUDENT'
+        ''', (month_start.strftime('%Y-%m-%d'), month_end.strftime('%Y-%m-%d')))
+        
+        unique_students = cursor.fetchone()['count']
+        
+        cursor.execute('''
+            SELECT COUNT(DISTINCT person_id) as count
+            FROM time_records
+            WHERE date BETWEEN ? AND ? AND person_type = 'GUEST'
+        ''', (month_start.strftime('%Y-%m-%d'), month_end.strftime('%Y-%m-%d')))
+        
+        unique_guests = cursor.fetchone()['count']
+        
+        return {
+            'month': target_dt.strftime('%B %Y'),
+            'total_activities': total_activities,
+            'unique_students': unique_students,
+            'unique_guests': unique_guests
+        }
+        
+    finally:
+        conn.close()
+
 @app.route('/settings')
 @login_required
 def settings():
@@ -222,6 +485,7 @@ def settings():
     stats = db.get_database_stats()
     return render_template('settings.html',
                          system_name=SYSTEM_NAME,
+                         system_version=SYSTEM_VERSION,
                          stats=stats)
 
 @app.route('/api/system-info')
@@ -230,9 +494,6 @@ def get_system_info():
     """Get system information"""
     try:
         stats = db.get_database_stats()
-        
-        # Get system uptime (simplified)
-        uptime = "System running"
         
         # Get network info
         import socket
@@ -246,7 +507,7 @@ def get_system_info():
                 'version': SYSTEM_VERSION,
                 'ip_address': ip_address,
                 'hostname': hostname,
-                'uptime': uptime
+                'uptime': "System running"
             },
             'database': {
                 'total_students': stats.get('total_students', 0),

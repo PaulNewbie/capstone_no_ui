@@ -1,20 +1,11 @@
+# utils/display_helpers.py - Simplified without manual slot selection
+
 from utils.gui_helpers import show_message_gui
 import time
 
 def show_results_gui(title, message):
     """Show results in GUI message box"""
     show_message_gui(title, message)
-
-def get_num(max_number):
-    """Get valid numeric input within range"""
-    while True:
-        try:
-            num = int(input(f"Enter slot ID # from 0-{max_number - 1}: "))
-            if 0 <= num < max_number:
-                return num
-        except ValueError:
-            pass
-        print("❌ Please enter a valid number.")
 
 def display_menu(menu_config):
     """
@@ -77,4 +68,3 @@ def display_verification_result(user_info, verification_data):
     
     # Show GUI result
     show_results_gui("Verification Complete", verification_data.get('gui_message', ''))
-

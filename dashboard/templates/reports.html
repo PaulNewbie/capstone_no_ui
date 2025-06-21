@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+
+{% block title %}Reports - {{ system_name }}{% endblock %}
+
+{% block page_title %}System Reports{% endblock %}
+
+{% block content %}
+<!-- Report Filter Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="data-table">
+            <h5 class="mb-3">Generate Report</h5>
+            <form id="report-form" class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Report Type</label>
+                    <select class="form-select" id="report-type">
+                        <option value="daily">Daily Report</option>
+                        <option value="course">Course Statistics</option>
+                        <option value="weekly">Weekly Summary</option>
+                        <option value="monthly">Monthly Summary</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Date</label>
+                    <input type="date" class="form-control" id="report-date">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Course (Optional)</label>
+                    <select class="form-select" id="course-filter">
+                        <option value="">All Courses</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-chart-bar"></i> Generate Report
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Report Results -->
+<div class="row" id="report-results" style="display: none;">
+    <div class="col-12">
+        <div class="data-table">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0" id="report-title">Report Results</h5>
+                <button class="btn btn-outline-secondary btn-sm" onclick="printReport()">
+                    <i class="fas fa-print"></i> Print
+                </button>
+            </div>
+            
+            <div id="report-content">
+                <!-- Report content will be loaded here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Course Statistics Cards -->
+<div class="row" id="course-stats" style="display: none;">
+    <div class="col-12">
+        <h5 class="mb-3">Course Statistics</h5>
+    </div>
+    <div id="course-cards-container">
+        <!-- Course cards will be generated here -->
+    </div>
+</div>
+
+<!-- Loading Indicator -->
+<div class="loading" id="report-loading">
+    <i class="fas fa-spinner fa-spin"></i> Generating report...
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    // Set default date to today
+    $('#report-date').val(new Date().toISOString().split('T')[0]);
+    
+    // Load available courses
+    loadCourses();
+    
+    // Handle form submission
+    $('#report-form').on('submit', function(e) {
+        e.preventDefault();
+        generateReport();
+    });
+});
+
+function loadCourses() {
+    $.ajax({
+        url: '/api/courses',
+        method: 'GET',
+        success: function(data) {
+            if (data.success) {
+                const courseSelect = $('#course-filter');
+                courseSelect.empty().append('<option value="">All Courses</option>');
+                
+                data.courses.forEach(function(course) {
+                    courseSelect.append(`<option value="${course}">${course}</option>`);
+                });
+            }
+        },
+        error: function() {
+            console.log('Could not load courses');
+        }
+    });
+}
+
+function generateReport() {
+    const reportType = $('#report-type').val();
+    const reportDate = $('#report-date').val();
+    const courseFilter = $('#course-filter').val();
+    
+    $('#report-loading').addClass('show');
+    $('#report-results').hide();
+    $('#course-stats').hide();
+    
+    const params = {
+        type: reportType,
+        date: reportDate,
+        course: courseFilter
+    };
+    
+    $.ajax({
+        url: '/api/generate-report',
+        method: 'GET',
+        data: params,
+        success: function(data) {
+            $('#report-loading').removeClass('show');
+            
+            if (data.success) {
+                displayReport(data.report, reportType);
+            } else {
+                alert('Failed to generate report: ' + (data.error || 'Unknown error'));
+            }
+        },
+        error: function() {
+            $('#report-loading').removeClass('show');
+            alert('Error generating report');
+        }
+    });
+}
+
+function displayReport(report, type) {
+    const title = getReportTitle(type, report);
+    $('#report-title').text(title);
+    
+    let content = '';
+    
+    if (type === 'daily') {
+        content = generateDailyReport(report);
+    } else if (type === 'course') {
+        content = generateCourseReport(report);
+        displayCourseCards(report.course_details || []);
+    } else if (type === 'weekly' || type === 'monthly') {
+        content = generatePeriodReport(report);
+    }
+    
+    $('#report-content').html(content);
+    $('#report-results').show();
+    
+    if (type === 'course') {
+        $('#course-stats').show();
+    }
+}
+
+function generateDailyReport(report) {
+    return `
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <h6>Student Activity</h6>
+                <table class="table table-sm">
+                    <tr><td>Time In:</td><td class="text-end">${report.students?.time_in || 0}</td></tr>
+                    <tr><td>Time Out:</td><td class="text-end">${report.students?.time_out || 0}</td></tr>
+                    <tr><td>Currently Inside:</td><td class="text-end">${report.students?.currently_inside || 0}</td></tr>
+                </table>
+            </div>
+            <div class="col-md-6">
+                <h6>Guest Activity</h6>
+                <table class="table table-sm">
+                    <tr><td>Time In:</td><td class="text-end">${report.guests?.time_in || 0}</td></tr>
+                    <tr><td>Time Out:</td><td class="text-end">${report.guests?.time_out || 0}</td></tr>
+                    <tr><td>Currently Inside:</td><td class="text-end">${report.guests?.currently_inside || 0}</td></tr>
+                </table>
+            </div>
+        </div>
+        <div class="alert alert-info">
+            <strong>Total Currently Inside:</strong> ${report.total_currently_inside || 0} people
+        </div>
+    `;
+}
+
+function generateCourseReport(report) {
+    const courses = report.course_details || [];
+    
+    if (courses.length === 0) {
+        return '<div class="alert alert-warning">No course data available for selected date.</div>';
+    }
+    
+    let table = `
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>Course</th>
+                    <th class="text-center">Students</th>
+                    <th class="text-center">Time In</th>
+                    <th class="text-center">Time Out</th>
+                    <th class="text-center">Currently Inside</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    courses.forEach(function(course) {
+        table += `
+            <tr>
+                <td><strong>${course.course_name}</strong></td>
+                <td class="text-center">${course.total_students}</td>
+                <td class="text-center">${course.time_in}</td>
+                <td class="text-center">${course.time_out}</td>
+                <td class="text-center">${course.currently_inside}</td>
+            </tr>
+        `;
+    });
+    
+    table += '</tbody></table>';
+    return table;
+}
+
+function generatePeriodReport(report) {
+    return `
+        <div class="row">
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <h4>${report.total_activities || 0}</h4>
+                    <p>Total Activities</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <h4>${report.unique_students || 0}</h4>
+                    <p>Unique Students</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <h4>${report.unique_guests || 0}</h4>
+                    <p>Unique Guests</p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function displayCourseCards(courses) {
+    const container = $('#course-cards-container');
+    container.empty();
+    
+    courses.forEach(function(course) {
+        const percentage = course.total_students > 0 ? 
+            Math.round((course.currently_inside / course.total_students) * 100) : 0;
+        
+        const card = `
+            <div class="col-md-4 mb-3">
+                <div class="stat-card">
+                    <h6>${course.course_name}</h6>
+                    <div class="d-flex justify-content-between">
+                        <span>Inside: ${course.currently_inside}</span>
+                        <span>Total: ${course.total_students}</span>
+                    </div>
+                    <div class="progress mt-2">
+                        <div class="progress-bar" style="width: ${percentage}%"></div>
+                    </div>
+                    <small class="text-muted">${percentage}% inside</small>
+                </div>
+            </div>
+        `;
+        container.append(card);
+    });
+}
+
+function getReportTitle(type, report) {
+    const date = report.date || 'Unknown Date';
+    
+    switch(type) {
+        case 'daily': return `Daily Report - ${date}`;
+        case 'course': return `Course Statistics - ${date}`;
+        case 'weekly': return `Weekly Report - ${report.week || 'Unknown Week'}`;
+        case 'monthly': return `Monthly Report - ${report.month || 'Unknown Month'}`;
+        default: return 'Report';
+    }
+}
+
+function printReport() {
+    window.print();
+}
+</script>
+{% endblock %}
