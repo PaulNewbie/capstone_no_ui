@@ -1,4 +1,4 @@
-# controllers/guest.py - Cleaned and Optimized
+# controllers/guest.py - Simplified with Clean Buzzer Usage
 
 from services.license_reader import (
     auto_capture_license_rpi, 
@@ -7,7 +7,9 @@ from services.license_reader import (
     complete_guest_verification_flow
 )
 from services.helmet_infer import verify_helmet
-from services.led_control import *  
+from services.led_control import *
+from services.buzzer_control import play_processing, play_success, play_failure
+
 from utils.gui_helpers import show_results_gui, get_guest_info_gui, updated_guest_office_gui
 
 # Import database functions
@@ -22,12 +24,14 @@ def guest_verification():
     print("\n🎫 GUEST VERIFICATION SYSTEM")
     
     set_led_processing()
+    play_processing()  # Start process sound
     
     # Step 1: Helmet verification
     print("🪖 Checking helmet...")
     if not verify_helmet():
         print("❌ Helmet verification failed")
         set_led_idle()
+        play_failure()
         input("\n📱 Press Enter to return...")
         return
     
@@ -40,6 +44,7 @@ def guest_verification():
     if not image_path:
         print("❌ License capture failed")
         set_led_idle()
+        play_failure()
         input("\n📱 Press Enter to return...")
         return
     
@@ -62,23 +67,17 @@ def guest_verification():
     input("\n📱 Press Enter to return...")
 
 def extract_guest_name_from_license_image(image_path: str) -> str:
-    """Simple and reliable guest name extraction - returns SURNAME, FIRSTNAME MIDDLENAME format"""
+    """Simple and reliable guest name extraction"""
     try:
         import re
         ocr_text = extract_text_from_image(image_path)
         lines = [line.strip() for line in ocr_text.splitlines() if line.strip()]
         
-        # Debug: Show what we're working with
-        print("Debug: Checking lines for name:")
-        for i, line in enumerate(lines[:15]):
-            print(f"  Line {i}: {line}")
-        
         # Check first 15 lines only
         for line in lines[:15]:
-            original_line = line.strip()
             line_clean = line.upper().strip()
             
-            # Remove common OCR artifacts: leading numbers, dots, special chars
+            # Remove common OCR artifacts
             line_clean = re.sub(r'^[\d\.\-\s]+', '', line_clean)
             
             # Skip empty lines after cleaning
@@ -89,38 +88,25 @@ def extract_guest_name_from_license_image(image_path: str) -> str:
             if line_clean.count(',') != 1:
                 continue
             
-            # ADDRESS PATTERNS TO SKIP
+            # Skip address patterns
             address_indicators = [
-                'BLK', 'BLOCK', 'LOT', 'PHASE', 'PH', 
-                'STREET', 'ST', 'ROAD', 'RD', 'AVENUE', 'AVE',
-                'BARANGAY', 'BRGY', 'CITY', 'PROVINCE',
-                'UNIT', 'BLDG', 'BUILDING', 'FLOOR', 'FLR',
-                'SUBDIVISION', 'SUBD', 'VILLAGE', 'VILL',
-                'RESIDENCIA', 'RESIDENCE', 'APARTMENT', 'APT',
-                'CONDO', 'CONDOMINIUM', 'TOWNHOUSE',
-                'ZIP', 'POSTAL'
+                'BLK', 'BLOCK', 'LOT', 'PHASE', 'STREET', 'ST', 'ROAD', 'RD', 
+                'AVENUE', 'AVE', 'BARANGAY', 'BRGY', 'CITY', 'PROVINCE'
             ]
             
-            # Check if line contains address indicators
-            contains_address = any(indicator in line_clean.split() for indicator in address_indicators)
-            if contains_address:
-                print(f"  Skipping address line: {line_clean}")
+            if any(indicator in line_clean.split() for indicator in address_indicators):
                 continue
             
-            # Skip lines with obvious document keywords
+            # Skip document keywords
             doc_keywords = [
                 'REPUBLIC', 'PHILIPPINES', 'DEPARTMENT', 'TRANSPORTATION', 
-                'LICENSE', 'DRIVER', 'ADDRESS', 'NATIONALITY', 'OFFICE',
-                'EXPIRATION', 'REGISTRATION', 'RESTRICTION', 'CONDITION'
+                'LICENSE', 'DRIVER', 'ADDRESS', 'NATIONALITY', 'OFFICE'
             ]
             if any(keyword in line_clean for keyword in doc_keywords):
-                print(f"  Skipping document line: {line_clean}")
                 continue
             
-            # Check for number patterns common in addresses
-            # Like "123 STREET" or "BLOCK 13" but not in names
-            if re.search(r'\b\d{2,}\b', line_clean):  # Contains numbers with 2+ digits
-                print(f"  Skipping line with multi-digit numbers: {line_clean}")
+            # Skip lines with multi-digit numbers
+            if re.search(r'\b\d{2,}\b', line_clean):
                 continue
             
             try:
@@ -132,39 +118,27 @@ def extract_guest_name_from_license_image(image_path: str) -> str:
                 lastname = parts[0].strip()
                 firstname = parts[1].strip()
                 
-                # Remove any remaining single digits or special chars
-                # But keep spaces and letters
+                # Clean remaining special chars
                 lastname_clean = re.sub(r'[^A-Z\s]', '', lastname).strip()
                 firstname_clean = re.sub(r'[^A-Z\s]', '', firstname).strip()
                 
-                # Additional validation for names
-                # Names shouldn't be too short or too long
-                if (not lastname_clean or not firstname_clean or
-                    len(lastname_clean) < 2 or len(firstname_clean) < 2 or
-                    len(lastname_clean) > 20 or len(firstname_clean) > 30):
-                    continue
-                
-                # Check if both parts are valid names (only letters and spaces)
-                if (lastname_clean.replace(' ', '').isalpha() and 
-                    firstname_clean.replace(' ', '').isalpha()):
+                # Validate names
+                if (lastname_clean and firstname_clean and
+                    2 <= len(lastname_clean) <= 20 and 2 <= len(firstname_clean) <= 30 and
+                    lastname_clean.replace(' ', '').isalpha() and 
+                    firstname_clean.replace(' ', '').isalpha() and
+                    len(lastname_clean.split()) <= 3 and 
+                    len(firstname_clean.split()) <= 4):
                     
-                    # Additional check: Names typically don't have more than 3 words
-                    if (len(lastname_clean.split()) <= 3 and 
-                        len(firstname_clean.split()) <= 4):
-                        
-                        print(f"  Found name: {lastname_clean}, {firstname_clean}")
-                        # Return in SURNAME, FIRSTNAME MIDDLENAME format (all uppercase)
-                        return f"{lastname_clean}, {firstname_clean}"
+                    return f"{lastname_clean}, {firstname_clean}"
                     
-            except Exception as e:
-                print(f"  Error processing line '{line}': {e}")
+            except Exception:
                 continue
         
-        print("  No valid name found, returning 'Guest'")
         return "Guest"
         
     except Exception as e:
-        print(f"Error in extract_guest_name_from_license_image: {e}")
+        print(f"Error extracting name: {e}")
         return "Guest"
               
 def get_guest_time_status(detected_name, plate_number=None):
@@ -259,8 +233,10 @@ def _process_guest_time_out(guest_info, image_path):
     
     if time_result['success']:
         set_led_success(duration=5.0)
+        play_success()
     else:
         set_led_idle()
+        play_failure()
 
 def _process_returning_guest_time_in(guest_info, image_path):
     """Process returning guest time in"""
@@ -273,6 +249,7 @@ def _process_returning_guest_time_in(guest_info, image_path):
     if not updated_guest_info:
         print("❌ Office update cancelled")
         set_led_idle()
+        play_failure()
         return
     
     guest_data = {
@@ -295,11 +272,14 @@ def _process_returning_guest_time_in(guest_info, image_path):
         
         if time_result['success']:
             set_led_success(duration=5.0)
+            play_success()
         else:
             set_led_idle()
+            play_failure()
     else:
         print("❌ Guest verification failed")
         set_led_idle()
+        play_failure()
 
 def _process_new_guest_time_in(detected_name, image_path):
     """Process new guest time in"""
@@ -310,6 +290,7 @@ def _process_new_guest_time_in(detected_name, image_path):
     if not guest_info_input:
         print("❌ Guest info cancelled")
         set_led_idle()
+        play_failure()
         return
     
     print(f"✅ Guest info: {guest_info_input['name']} | {guest_info_input['plate_number']} | {guest_info_input['office']}")
@@ -334,11 +315,14 @@ def _process_new_guest_time_in(detected_name, image_path):
         
         if time_result['success']:
             set_led_success(duration=5.0)
+            play_success()
         else:
             set_led_idle()
+            play_failure()
     else:
         print("❌ Guest verification failed")
         set_led_idle()
+        play_failure()
 
 def _record_guest_time_in(guest_info):
     """Record guest time in"""
@@ -356,7 +340,6 @@ def _record_guest_time_in(guest_info):
                 'message': "❌ Failed to record TIME IN"
             }
     except Exception as e:
-        print(f"❌ Error processing guest time in: {e}")
         return {
             'success': False,
             'message': f"❌ Error: {e}"
@@ -378,7 +361,6 @@ def _record_guest_time_out(guest_info):
                 'message': "❌ Failed to record TIME OUT"
             }
     except Exception as e:
-        print(f"❌ Error processing guest time out: {e}")
         return {
             'success': False,
             'message': f"❌ Error: {e}"

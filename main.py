@@ -1,4 +1,5 @@
-# main.py - MotorPass GUI Application
+# main.py - Simplified Buzzer Integration
+
 import os
 import sqlite3
 from ui.main_window import MotorPassGUI
@@ -18,6 +19,12 @@ from services.led_control import (
     cleanup_led_system
 )
 
+from services.buzzer_control import ( 
+    init_buzzer, 
+    play_ready, 
+    cleanup_buzzer
+)
+
 # Database
 from database.unified_db import *
 
@@ -30,6 +37,10 @@ def initialize_system():
     led_ok = init_led_system(red_pin=18, green_pin=16)
     print(f"💡 LED System: {'✅' if led_ok else '❌'}")
     
+    # Initialize Simple Buzzer system
+    buzzer_ok = init_buzzer(pin=22)
+    print(f"🔊 Buzzer System: {'✅' if buzzer_ok else '❌'}")
+    
     # Initialize all databases
     db_ok = initialize_all_databases()
     
@@ -38,6 +49,8 @@ def initialize_system():
     
     print("✅ System ready!")
     set_led_idle()
+    if buzzer_ok:
+        play_ready()  # Simple ready beep
     return True
 
 def cleanup_system():
@@ -45,10 +58,11 @@ def cleanup_system():
     try:
         print("\n🧹 Cleaning up system resources...")
         cleanup_led_system()
+        cleanup_buzzer()
         print("✅ Cleanup complete")
     except Exception as e:
         print(f"⚠️ Cleanup error: {e}")
-
+        
 if __name__ == "__main__":
     print(f"🚗 {SYSTEM_NAME} v{SYSTEM_VERSION}")
     print("="*50)

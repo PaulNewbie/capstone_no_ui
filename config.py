@@ -13,6 +13,30 @@ RPI_CAMERA_WARMUP_TIME = 1  # seconds
 CAPTURE_QUALITY = 65  # JPEG quality (1-100)
 CAPTURE_FORMAT = 'JPEG'
 
+BUZZER_ENABLED = True
+BUZZER_PIN = 22
+
+# Sound Settings
+SOUND_PROFILES = {
+    'quiet': {
+        'enabled': True,
+        'volume': 30,
+        'skip_warnings': False
+    },
+    'normal': {
+        'enabled': True,
+        'volume': 50,
+        'skip_warnings': False
+    },
+    'silent': {
+        'enabled': False,
+        'volume': 0,
+        'skip_warnings': True
+    }
+}
+
+CURRENT_SOUND_PROFILE = 'normal'
+
 MAIN_MENU = {
     'title': f"🚗 {SYSTEM_NAME} - VERIFICATION SYSTEM",
     'options': [
