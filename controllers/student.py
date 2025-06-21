@@ -6,7 +6,7 @@ from services.helmet_infer import verify_helmet
 from services.led_control import *
 
 # Import database operations
-from dashboard.database.db_operations import (
+from database.db_operations import (
     get_student_time_status,
     record_time_in,
     record_time_out

@@ -19,7 +19,7 @@ from services.led_control import (
 )
 
 # Database
-from dashboard.database.unified_db import *
+from database.unified_db import *
 
 def initialize_system():
     """Initialize system components"""

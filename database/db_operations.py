@@ -1,20 +1,14 @@
-# database/db_operations.py - Updated to use Unified Database
+# database/db_operations.py - Fixed to use Unified Database
 
 import os
 import sqlite3
 from datetime import datetime
 
-# Import the new unified database system
-from dashboard.database.unified_db import (
-    MotorPassDatabase, db,
-    initialize_all_databases,
-    get_student_by_id,
-    get_student_time_status,
-    record_time_in,
-    record_time_out,
-    get_all_time_records,
-    clear_all_time_records,
-    get_students_currently_in
+# FIXED: Import the fixed unified database system
+from database.unified_db import (
+    db, initialize_all_databases, get_student_by_id, get_student_time_status,
+    record_time_in, record_time_out, get_all_time_records, clear_all_time_records,
+    get_students_currently_in, get_dashboard_summary
 )
 
 # =================== ENHANCED STUDENT OPERATIONS ===================
@@ -45,21 +39,7 @@ def get_all_active_students():
 
 def deactivate_student(student_id):
     """Deactivate student (soft delete)"""
-    return db.deactivate_student(student_id)
-
-# =================== ENHANCED ADMIN OPERATIONS ===================
-
-def add_admin_account(username, password, full_name, fingerprint_slot=None):
-    """Add admin account with secure password"""
-    return db.add_admin(username, password, full_name, fingerprint_slot)
-
-def authenticate_admin_credentials(username, password):
-    """Authenticate admin with username/password"""
-    return db.authenticate_admin(username, password)
-
-def get_admin_by_fingerprint(fingerprint_slot):
-    """Get admin by fingerprint slot"""
-    return db.get_admin_by_fingerprint(fingerprint_slot)
+    return db.update_student(student_id, is_active=False)
 
 # =================== ENHANCED TIME TRACKING ===================
 
@@ -146,12 +126,11 @@ def find_guest_by_name_similarity(detected_name, min_similarity=0.6):
     """Find guest by name similarity"""
     try:
         from difflib import SequenceMatcher
-        import sqlite3
         
+        # Get all guests
         conn = db.get_connection()
         cursor = conn.cursor()
         
-        # Get all active guests
         cursor.execute("SELECT * FROM guests WHERE is_active = 1")
         guests = cursor.fetchall()
         
@@ -275,15 +254,14 @@ def backup_databases(backup_dir="backups"):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = os.path.join(backup_dir, f"motorpass_{timestamp}.db")
     
-    return db.backup_database(backup_path)
-
-def archive_old_records(days_old=90):
-    """Archive old records"""
-    return db.archive_old_records(days_old)
-
-def get_archived_records(table_name=None, limit=100):
-    """Get archived records"""
-    return db.get_archived_records(table_name, limit)
+    try:
+        import shutil
+        shutil.copy2(db.db_path, backup_path)
+        print(f"✅ Database backed up to: {backup_path}")
+        return backup_path
+    except Exception as e:
+        print(f"❌ Backup failed: {e}")
+        return ""
 
 def cleanup_database():
     """Clean up and optimize database"""
@@ -302,28 +280,6 @@ def cleanup_database():
         
     except Exception as e:
         print(f"❌ Database cleanup failed: {e}")
-        return False
-
-# =================== MIGRATION HELPERS ===================
-
-def check_migration_needed():
-    """Check if migration from old system is needed"""
-    old_files = [
-        "database/time_tracking.db",
-        "database/students.db",
-        "json_folder/fingerprint_database.json",
-        "json_folder/admin_database.json"
-    ]
-    
-    return any(os.path.exists(f) for f in old_files)
-
-def run_migration():
-    """Run migration from old system"""
-    try:
-        from migrate_to_unified import run_migration
-        return run_migration()
-    except ImportError:
-        print("❌ Migration script not found")
         return False
 
 # =================== LEGACY COMPATIBILITY ===================
@@ -347,7 +303,5 @@ def cleanup_guest_data():
     return True
 
 # Print system info when imported
-print("🗄️ MotorPass Unified Database System loaded")
-if check_migration_needed():
-    print("⚠️ Old database files detected - consider running migration")
-    print("   Run: python migrate_to_unified.py")
+print("🗄️ MotorPass Database Operations loaded")
+print(f"📂 Database: {db.db_path}")

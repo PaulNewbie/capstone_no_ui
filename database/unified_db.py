@@ -1,4 +1,4 @@
-# database/unified_db.py - Unified MotorPass Database System
+# database/unified_db.py - Complete Database System
 
 import sqlite3
 import os
@@ -9,8 +9,16 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 import secrets
 
-# Database Configuration
-DB_FILE = "dashboard/database/motorpass.db"
+def get_database_path():
+    """Get the correct database path regardless of where script is run from"""
+    current_file = os.path.abspath(__file__)
+    project_root = os.path.dirname(os.path.dirname(current_file))
+    db_path = os.path.join(project_root, "database", "motorpass.db")
+    print(f"🗄️ Using database: {db_path}")
+    return db_path
+
+# Use dynamic path
+DB_FILE = get_database_path()
 DB_VERSION = "2.0"
 
 # Security Configuration
@@ -18,7 +26,10 @@ SALT_LENGTH = 32
 HASH_ITERATIONS = 100000
 
 class MotorPassDatabase:
-    def __init__(self, db_path: str = DB_FILE):
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            db_path = get_database_path()
+        
         self.db_path = db_path
         self.ensure_database_directory()
         self.initialize_database()
@@ -125,30 +136,6 @@ class MotorPassDatabase:
                 )
             ''')
             
-            # Archive table for old records
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS archived_records (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    original_table TEXT NOT NULL,
-                    original_id INTEGER,
-                    data TEXT NOT NULL,
-                    archived_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    archived_reason TEXT
-                )
-            ''')
-            
-            # Reports table for admin dashboard
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS reports (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    report_type TEXT NOT NULL,
-                    report_date DATE DEFAULT (DATE('now')),
-                    data TEXT NOT NULL,
-                    generated_by TEXT,
-                    generated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
             # Create indexes for better performance
             indexes = [
                 "CREATE INDEX IF NOT EXISTS idx_students_student_id ON students(student_id)",
@@ -156,8 +143,7 @@ class MotorPassDatabase:
                 "CREATE INDEX IF NOT EXISTS idx_time_records_person ON time_records(person_id, timestamp)",
                 "CREATE INDEX IF NOT EXISTS idx_time_records_date ON time_records(date)",
                 "CREATE INDEX IF NOT EXISTS idx_current_status_type ON current_status(person_type, current_status)",
-                "CREATE INDEX IF NOT EXISTS idx_guests_plate ON guests(plate_number)",
-                "CREATE INDEX IF NOT EXISTS idx_archived_table ON archived_records(original_table, archived_at)"
+                "CREATE INDEX IF NOT EXISTS idx_guests_plate ON guests(plate_number)"
             ]
             
             for index_sql in indexes:
@@ -283,10 +269,6 @@ class MotorPassDatabase:
         finally:
             conn.close()
     
-    def deactivate_student(self, student_id: str) -> bool:
-        """Deactivate student (soft delete)"""
-        return self.update_student(student_id, is_active=False)
-    
     def get_all_students(self, active_only: bool = True) -> List[Dict]:
         """Get all students"""
         conn = self.get_connection()
@@ -306,120 +288,34 @@ class MotorPassDatabase:
         finally:
             conn.close()
     
-    # =================== ADMIN OPERATIONS ===================
-    
-    def add_admin(self, username: str, password: str, full_name: str, fingerprint_slot: int = None) -> bool:
-        """Add new admin with secure password"""
-        conn = self.get_connection()
-        try:
-            cursor = conn.cursor()
-            
-            # Hash password
-            password_hash, salt = self.hash_password(password)
-            
-            cursor.execute('''
-                INSERT INTO admins (username, password_hash, salt, full_name, fingerprint_slot)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (username, password_hash, salt, full_name, fingerprint_slot))
-            
-            conn.commit()
-            print(f"✅ Admin added: {full_name} ({username})")
-            return True
-            
-        except sqlite3.IntegrityError as e:
-            if "username" in str(e):
-                print(f"❌ Username {username} already exists")
-            elif "fingerprint_slot" in str(e):
-                print(f"❌ Fingerprint slot {fingerprint_slot} already in use")
-            else:
-                print(f"❌ Admin creation error: {e}")
-            return False
-        except Exception as e:
-            print(f"❌ Unexpected error adding admin: {e}")
-            return False
-        finally:
-            conn.close()
-    
-    def authenticate_admin(self, username: str, password: str) -> Optional[Dict]:
-        """Authenticate admin with username/password"""
-        conn = self.get_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT id, username, password_hash, salt, full_name, fingerprint_slot
-                FROM admins 
-                WHERE username = ? AND is_active = 1
-            ''', (username,))
-            
-            row = cursor.fetchone()
-            if not row:
-                return None
-            
-            admin_data = dict(row)
-            
-            # Verify password
-            if self.verify_password(password, admin_data['password_hash'], admin_data['salt']):
-                # Update last login
-                cursor.execute('''
-                    UPDATE admins SET last_login = CURRENT_TIMESTAMP WHERE id = ?
-                ''', (admin_data['id'],))
-                conn.commit()
-                
-                # Remove sensitive data before returning
-                del admin_data['password_hash']
-                del admin_data['salt']
-                
-                return admin_data
-            
-            return None
-            
-        except Exception as e:
-            print(f"❌ Admin authentication error: {e}")
-            return None
-        finally:
-            conn.close()
-    
-    def get_admin_by_fingerprint(self, fingerprint_slot: int) -> Optional[Dict]:
-        """Get admin by fingerprint slot"""
-        conn = self.get_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT id, username, full_name, fingerprint_slot
-                FROM admins 
-                WHERE fingerprint_slot = ? AND is_active = 1
-            ''', (fingerprint_slot,))
-            
-            row = cursor.fetchone()
-            return dict(row) if row else None
-            
-        except Exception as e:
-            print(f"❌ Error fetching admin by fingerprint: {e}")
-            return None
-        finally:
-            conn.close()
-    
     # =================== TIME TRACKING OPERATIONS ===================
     
     def record_time_action(self, person_id: str, person_name: str, person_type: str, 
                           action: str, additional_info: str = None) -> bool:
-        """Record time IN/OUT action"""
+        """Record time IN/OUT action with local timezone"""
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
             
-            # Insert time record
-            cursor.execute('''
-                INSERT INTO time_records (person_id, person_name, person_type, action, additional_info)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (person_id, person_name, person_type, action, additional_info))
+            # Get local timestamp
+            local_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            local_date = datetime.now().strftime('%Y-%m-%d')
+            local_time = datetime.now().strftime('%H:%M:%S')
             
-            # Update current status
+            # Insert time record with local time
+            cursor.execute('''
+                INSERT INTO time_records (person_id, person_name, person_type, action, 
+                                        timestamp, date, time, additional_info)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (person_id, person_name, person_type, action, local_timestamp, 
+                  local_date, local_time, additional_info))
+            
+            # Update current status with local time
             cursor.execute('''
                 INSERT OR REPLACE INTO current_status 
-                (person_id, person_name, person_type, current_status, additional_info)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (person_id, person_name, person_type, action, additional_info))
+                (person_id, person_name, person_type, current_status, last_action_time, additional_info)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (person_id, person_name, person_type, action, local_timestamp, additional_info))
             
             conn.commit()
             print(f"✅ Time {action} recorded: {person_name} ({person_type})")
@@ -575,83 +471,6 @@ class MotorPassDatabase:
         finally:
             conn.close()
     
-    # =================== ARCHIVE OPERATIONS ===================
-    
-    def archive_old_records(self, days_old: int = 90) -> int:
-        """Archive old time records"""
-        cutoff_date = (datetime.now() - timedelta(days=days_old)).date()
-        
-        conn = self.get_connection()
-        try:
-            cursor = conn.cursor()
-            
-            # Get old records
-            cursor.execute('''
-                SELECT * FROM time_records WHERE date < ?
-            ''', (cutoff_date,))
-            
-            old_records = cursor.fetchall()
-            archived_count = 0
-            
-            for record in old_records:
-                # Archive the record
-                record_data = dict(record)
-                cursor.execute('''
-                    INSERT INTO archived_records (original_table, original_id, data, archived_reason)
-                    VALUES (?, ?, ?, ?)
-                ''', ("time_records", record['id'], json.dumps(record_data, default=str), 
-                     f"Auto-archived after {days_old} days"))
-                
-                # Delete original
-                cursor.execute("DELETE FROM time_records WHERE id = ?", (record['id'],))
-                archived_count += 1
-            
-            conn.commit()
-            print(f"✅ Archived {archived_count} old records")
-            return archived_count
-            
-        except Exception as e:
-            print(f"❌ Error archiving records: {e}")
-            conn.rollback()
-            return 0
-        finally:
-            conn.close()
-    
-    def get_archived_records(self, table_name: str = None, limit: int = 100) -> List[Dict]:
-        """Get archived records"""
-        conn = self.get_connection()
-        try:
-            cursor = conn.cursor()
-            
-            if table_name:
-                cursor.execute('''
-                    SELECT * FROM archived_records 
-                    WHERE original_table = ?
-                    ORDER BY archived_at DESC LIMIT ?
-                ''', (table_name, limit))
-            else:
-                cursor.execute('''
-                    SELECT * FROM archived_records 
-                    ORDER BY archived_at DESC LIMIT ?
-                ''', (limit,))
-            
-            records = []
-            for row in cursor.fetchall():
-                record = dict(row)
-                try:
-                    record['data'] = json.loads(record['data'])
-                except:
-                    pass
-                records.append(record)
-            
-            return records
-            
-        except Exception as e:
-            print(f"❌ Error getting archived records: {e}")
-            return []
-        finally:
-            conn.close()
-    
     # =================== REPORT OPERATIONS ===================
     
     def generate_daily_report(self, target_date: str = None) -> Dict:
@@ -693,7 +512,7 @@ class MotorPassDatabase:
             
             currently_inside = {row['person_type']: row['count'] for row in cursor.fetchall()}
             
-            report_data = {
+            return {
                 'date': target_date,
                 'students': {
                     'time_in': student_actions.get('IN', 0),
@@ -708,15 +527,6 @@ class MotorPassDatabase:
                 'total_currently_inside': sum(currently_inside.values()),
                 'generated_at': datetime.now().isoformat()
             }
-            
-            # Save report
-            cursor.execute('''
-                INSERT INTO reports (report_type, report_date, data, generated_by)
-                VALUES (?, ?, ?, ?)
-            ''', ("daily", target_date, json.dumps(report_data), "system"))
-            
-            conn.commit()
-            return report_data
             
         except Exception as e:
             print(f"❌ Error generating daily report: {e}")
@@ -785,20 +595,16 @@ class MotorPassDatabase:
     # =================== MAINTENANCE OPERATIONS ===================
     
     def clear_all_time_records(self) -> bool:
-        """Clear all time records (with archive option)"""
+        """Clear all time records"""
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
             
-            # Archive first
-            self.archive_old_records(days_old=0)  # Archive all
-            
-            # Clear tables
             cursor.execute("DELETE FROM time_records")
             cursor.execute("DELETE FROM current_status")
             
             conn.commit()
-            print("✅ All time records cleared (archived)")
+            print("✅ All time records cleared")
             return True
             
         except Exception as e:
@@ -817,7 +623,7 @@ class MotorPassDatabase:
             stats = {}
             
             # Count records in each table
-            tables = ['students', 'admins', 'time_records', 'current_status', 'guests', 'archived_records', 'reports']
+            tables = ['students', 'time_records', 'current_status', 'guests']
             
             for table in tables:
                 cursor.execute(f"SELECT COUNT(*) as count FROM {table}")
@@ -842,27 +648,11 @@ class MotorPassDatabase:
             return {}
         finally:
             conn.close()
-    
-    def backup_database(self, backup_path: str = None) -> str:
-        """Create database backup"""
-        if not backup_path:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_path = f"backup_motorpass_{timestamp}.db"
-        
-        try:
-            import shutil
-            shutil.copy2(self.db_path, backup_path)
-            print(f"✅ Database backed up to: {backup_path}")
-            return backup_path
-        except Exception as e:
-            print(f"❌ Backup failed: {e}")
-            return ""
 
 # Create global instance
 db = MotorPassDatabase()
 
 # =================== COMPATIBILITY FUNCTIONS ===================
-# These maintain compatibility with existing code
 
 def initialize_all_databases():
     """Initialize database (compatibility function)"""
@@ -933,9 +723,10 @@ def get_students_currently_in():
         'time_in': p['last_action_time']
     } for p in people]
 
+def get_dashboard_summary():
+    """Get dashboard summary (compatibility)"""
+    return db.get_dashboard_summary()
+
 # Print initialization message
-if __name__ == "__main__":
-    print("🗄️ MotorPass Unified Database System")
-    print(f"📊 Database: {DB_FILE}")
-    stats = db.get_database_stats()
-    print("📈 Statistics:", stats)
+print("🗄️ MotorPass Database System Ready")
+print(f"📂 Database location: {DB_FILE}")

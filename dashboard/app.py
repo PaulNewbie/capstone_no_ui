@@ -1,4 +1,4 @@
-# dashboard/app.py - MotorPass Admin Dashboard
+# dashboard/app.py - Fixed MotorPass Admin Dashboard
 
 from flask import Flask, render_template, jsonify, request, session, redirect, url_for
 from flask_cors import CORS
@@ -8,14 +8,14 @@ import sys
 from datetime import datetime, timedelta
 import hashlib
 
-# Add parent directory to path to import database
-# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# FIXED: Add project root to path for proper imports
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
 
 from config import SYSTEM_NAME, SYSTEM_VERSION
 
-import dashboard.database.unified_db as db
-
-db.DB_FILE = os.path.join("database", "motorpass.db")
+# FIXED: Import unified database - it will use the correct path automatically
+from database.unified_db import db, get_dashboard_summary
 
 app = Flask(__name__)
 app.secret_key = 'motorpass-secret-key-change-this'  # Change this to a random secret key

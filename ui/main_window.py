@@ -187,7 +187,7 @@ class MotorPassGUI:
     def get_current_time_in_count(self):
         """Get count of people currently timed in"""
         try:
-            from dashboard.database.unified_db import db
+            from database.unified_db import db
             
             # Get count of people currently inside using new database
             people_inside = db.get_people_currently_inside()

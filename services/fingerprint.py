@@ -1,4 +1,4 @@
-# services/fingerprint.py - Cleaned Fingerprint Service
+# services/fingerprint.py - Fixed with Unified Database Integration
 
 import time
 import serial
@@ -8,8 +8,8 @@ import os
 import tkinter as tk
 from tkinter import simpledialog, messagebox
 
-# Import database operations
-from dashboard.database.db_operations import (
+# Import database operations - FIXED to use unified database
+from database.db_operations import (
     get_student_by_id,
     get_student_time_status,
     record_time_in,
@@ -19,6 +19,9 @@ from dashboard.database.db_operations import (
     clear_all_time_records,
     get_students_currently_in
 )
+
+# FIXED: Import unified database for student management
+from database.unified_db import db
 
 # =================== SETUP ===================
 uart = serial.Serial("/dev/ttyS0", baudrate=57600, timeout=1)
@@ -59,7 +62,7 @@ def load_admin_database():
 # =================== GUI FUNCTIONS ===================
 
 def get_student_id_gui():
-    """Get student ID via GUI and fetch info"""
+    """Get student ID via GUI and fetch info from UNIFIED database"""
     root = tk.Tk()
     root.withdraw()
     
@@ -71,7 +74,9 @@ def get_student_id_gui():
             return None
         
         student_id = student_id.strip()
-        student_info = get_student_by_id(student_id)
+        
+        # FIXED: Get student from unified database
+        student_info = db.get_student(student_id=student_id)
         
         if student_info:
             confirmation_message = f"""
@@ -79,9 +84,9 @@ Student Information Found:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 👤 Name: {student_info['full_name']}
 🆔 Student No.: {student_info['student_id']}
-📚 Course: {student_info['course']}
-🪪 License No.: {student_info['license_number']}
-📅 License Exp.: {student_info['expiration_date']}
+📚 Course: {student_info.get('course', 'N/A')}
+🪪 License No.: {student_info.get('license_number', 'N/A')}
+📅 License Exp.: {student_info.get('license_expiration', 'N/A')}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Proceed with fingerprint enrollment?
@@ -89,10 +94,22 @@ Proceed with fingerprint enrollment?
             
             if messagebox.askyesno("Confirm Student Information", confirmation_message):
                 root.destroy()
-                return student_info
+                # Convert to expected format
+                return {
+                    'full_name': student_info['full_name'],
+                    'student_id': student_info['student_id'],
+                    'course': student_info.get('course', 'N/A'),
+                    'license_number': student_info.get('license_number', 'N/A'),
+                    'expiration_date': student_info.get('license_expiration', 'N/A')
+                }
         else:
             if not messagebox.askyesno("Student Not Found", 
-                f"Student ID '{student_id}' not found.\n\nTry again?"):
+                f"Student ID '{student_id}' not found in database.\n\n" + 
+                "This might mean:\n" +
+                "1. Student hasn't filled Google Forms yet\n" +
+                "2. Database needs to be synced\n" +
+                "3. Student ID was entered incorrectly\n\n" +
+                "Try again?"):
                 root.destroy()
                 return None
 
@@ -149,7 +166,7 @@ def _process_fingerprint_template(template_num):
 # =================== FINGERPRINT FUNCTIONS ===================
 
 def enroll_finger_with_student_info(location):
-    """Enhanced enrollment using Student ID with retry mechanism"""
+    """FIXED: Enhanced enrollment using unified database"""
     print(f"\n🔒 Starting enrollment for slot #{location}")
     
     student_info = get_student_id_gui()
@@ -159,6 +176,21 @@ def enroll_finger_with_student_info(location):
     
     display_student_info(student_info)
     print(f"👤 Enrolling: {student_info['full_name']}")
+    
+    # Check if student already has fingerprint enrolled
+    existing_student = db.get_student(student_id=student_info['student_id'])
+    if existing_student and existing_student.get('fingerprint_slot'):
+        print(f"⚠️  Student already has fingerprint at slot {existing_student['fingerprint_slot']}")
+        if input("Replace existing fingerprint? (y/N): ").lower() != 'y':
+            print("❌ Enrollment cancelled")
+            return False
+        
+        # Delete old fingerprint
+        try:
+            finger.delete_model(existing_student['fingerprint_slot'])
+            print(f"🗑️  Removed old fingerprint from slot {existing_student['fingerprint_slot']}")
+        except:
+            pass
     
     # Fingerprint enrollment process with retry
     for fingerimg in range(1, 3):
@@ -198,7 +230,13 @@ def enroll_finger_with_student_info(location):
     if finger.store_model(location) == adafruit_fingerprint.OK:
         print("✅")
         
-        # Save student info
+        # FIXED: Update unified database with fingerprint slot
+        db.update_student(
+            student_id=student_info['student_id'],
+            fingerprint_slot=location
+        )
+        
+        # Also save to JSON for backward compatibility
         database = load_fingerprint_database()
         database[str(location)] = {
             "name": student_info['full_name'],
@@ -211,6 +249,7 @@ def enroll_finger_with_student_info(location):
         save_fingerprint_database(database)
         
         print(f"🎉 Successfully enrolled {student_info['full_name']} at slot #{location}")
+        print(f"📊 Updated unified database with fingerprint association")
         
         success_message = f"""
 Enrollment Successful! ✅
@@ -221,6 +260,7 @@ Enrollment Successful! ✅
 🪪 License: {student_info['license_number']}
 🔒 Fingerprint Slot: #{location}
 📅 Enrolled: {time.strftime("%Y-%m-%d %H:%M:%S")}
+🗄️  Database: Updated
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         """
         
@@ -231,7 +271,7 @@ Enrollment Successful! ✅
         return False
 
 def authenticate_fingerprint(max_attempts=3):
-    """Authenticate fingerprint and return student info with retry mechanism"""
+    """FIXED: Authenticate fingerprint using unified database"""
     attempts = 0
     
     while attempts < max_attempts:
@@ -269,40 +309,66 @@ def authenticate_fingerprint(max_attempts=3):
                 print("❌ Maximum attempts reached. No match found.")
                 return None
         
-        # Authentication successful - get student info
-        database = load_fingerprint_database()
-        finger_id = str(finger.finger_id)
+        # Authentication successful - get student info from unified database
+        fingerprint_slot = finger.finger_id
         
-        if finger_id in database:
-            student_info = database[finger_id]
+        # FIXED: Get student from unified database by fingerprint slot
+        student_db_info = db.get_student(fingerprint_slot=fingerprint_slot)
+        
+        if student_db_info:
             print(f"✅ Authentication successful!")
-            print(f"👤 Welcome: {student_info['name']}")
-            print(f"🆔 ID: {student_info.get('student_id', 'N/A')}")
-            print(f"📚 Course: {student_info.get('course', 'N/A')}")
+            print(f"👤 Welcome: {student_db_info['full_name']}")
+            print(f"🆔 ID: {student_db_info['student_id']}")
+            print(f"📚 Course: {student_db_info.get('course', 'N/A')}")
             print(f"🎯 Confidence: {finger.confidence}")
             
             return {
-                "name": student_info['name'],
-                "student_id": student_info.get('student_id', 'N/A'),
-                "course": student_info.get('course', 'N/A'),
-                "license_number": student_info.get('license_number', 'N/A'),
-                "license_expiration": student_info.get('license_expiration', 'N/A'),
-                "finger_id": finger.finger_id,
+                "name": student_db_info['full_name'],
+                "student_id": student_db_info['student_id'],
+                "course": student_db_info.get('course', 'N/A'),
+                "license_number": student_db_info.get('license_number', 'N/A'),
+                "license_expiration": student_db_info.get('license_expiration', 'N/A'),
+                "finger_id": fingerprint_slot,
                 "confidence": finger.confidence,
-                "enrolled_date": student_info.get('enrolled_date', 'Unknown')
+                "enrolled_date": student_db_info.get('created_at', 'Unknown')
             }
         else:
-            print(f"⚠️ Fingerprint recognized (ID: {finger.finger_id}) but no student data found")
-            return {
-                "name": f"Unknown User (ID: {finger.finger_id})",
-                "student_id": "N/A",
-                "course": "N/A",
-                "license_number": "N/A",
-                "license_expiration": "N/A",
-                "finger_id": finger.finger_id,
-                "confidence": finger.confidence,
-                "enrolled_date": "Unknown"
-            }
+            # Fallback to JSON database for backward compatibility
+            database = load_fingerprint_database()
+            finger_id = str(fingerprint_slot)
+            
+            if finger_id in database:
+                student_info = database[finger_id]
+                print(f"✅ Authentication successful (from JSON backup)!")
+                print(f"👤 Welcome: {student_info['name']}")
+                print(f"🆔 ID: {student_info.get('student_id', 'N/A')}")
+                print(f"📚 Course: {student_info.get('course', 'N/A')}")
+                print(f"🎯 Confidence: {finger.confidence}")
+                print(f"⚠️  Consider running data sync to update unified database")
+                
+                return {
+                    "name": student_info['name'],
+                    "student_id": student_info.get('student_id', 'N/A'),
+                    "course": student_info.get('course', 'N/A'),
+                    "license_number": student_info.get('license_number', 'N/A'),
+                    "license_expiration": student_info.get('license_expiration', 'N/A'),
+                    "finger_id": fingerprint_slot,
+                    "confidence": finger.confidence,
+                    "enrolled_date": student_info.get('enrolled_date', 'Unknown')
+                }
+            else:
+                print(f"⚠️ Fingerprint recognized (ID: {fingerprint_slot}) but no student data found")
+                print(f"📊 Consider running: python sync_all_data.py")
+                return {
+                    "name": f"Unknown User (Slot {fingerprint_slot})",
+                    "student_id": "N/A",
+                    "course": "N/A",
+                    "license_number": "N/A",
+                    "license_expiration": "N/A",
+                    "finger_id": fingerprint_slot,
+                    "confidence": finger.confidence,
+                    "enrolled_date": "Unknown"
+                }
     
     return None
 

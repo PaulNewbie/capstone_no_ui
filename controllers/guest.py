@@ -11,8 +11,8 @@ from services.led_control import *
 from utils.gui_helpers import show_results_gui, get_guest_info_gui, updated_guest_office_gui
 
 # Import database functions
-from dashboard.database.unified_db import db
-from dashboard.database.db_operations import record_guest_time_in, record_guest_time_out
+from database.unified_db import db
+from database.db_operations import record_guest_time_in, record_guest_time_out
 
 import difflib
 import time

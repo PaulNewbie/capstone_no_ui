@@ -1,15 +1,18 @@
-# controllers/admin.py 
+# controllers/admin.py - Fixed with Unified Database Sync
 
 from config import ADMIN_MENU
 from services.fingerprint import *
 
-from dashboard.database.db_operations import (
+from database.db_operations import (
     get_all_time_records,
     clear_all_time_records,
     get_students_currently_in,
     get_database_stats,
     backup_databases
 )
+
+# FIXED: Import unified database for sync
+from database.unified_db import db
 
 from utils.display_helpers import (
 	display_menu, 
@@ -177,42 +180,36 @@ def admin_enroll():
     print(f"{'✅ Success!' if success else '❌ Failed.'}")
 
 def admin_view_enrolled():
-    """Display all enrolled students"""
-    database = load_fingerprint_database()
-    if not database:
+    """Display all enrolled students from UNIFIED database"""
+    # FIXED: Get students from unified database instead of JSON
+    students = db.get_all_students()
+    
+    if not students:
         print("📁 No students enrolled.")
         return
     
     print("\n👥 ENROLLED STUDENTS:")
     display_separator()
     
-    student_count = 0  # Initialize student_count
-    
-    for finger_id, info in database.items():
-        # Skip admin slot
-        if finger_id == "1":
-            continue
-            
-        student_count += 1
-        
-        print(f"🆔 Slot: {finger_id}")
-        print(f"👤 Name: {info['name']}")
-        print(f"🎓 Student ID: {info.get('student_id', 'N/A')}")
-        print(f"📚 Course: {info.get('course', 'N/A')}")
-        print(f"🪪 License: {info.get('license_number', 'N/A')}")
-        print(f"📅 License Exp: {info.get('license_expiration', 'N/A')}")
-        print(f"🕒 Enrolled: {info.get('enrolled_date', 'Unknown')}")
+    for student in students:
+        print(f"🆔 Slot: {student.get('fingerprint_slot', 'N/A')}")
+        print(f"👤 Name: {student['full_name']}")
+        print(f"🎓 Student ID: {student['student_id']}")
+        print(f"📚 Course: {student.get('course', 'N/A')}")
+        print(f"🪪 License: {student.get('license_number', 'N/A')}")
+        print(f"📅 License Exp: {student.get('license_expiration', 'N/A')}")
+        print(f"🕒 Enrolled: {student.get('created_at', 'Unknown')}")
         print("-" * 50)
     
-    if student_count == 0:
-        print("📁 No students enrolled.")
-    else:
-        print(f"\n📊 Total Students: {student_count}")
+    print(f"\n📊 Total Students: {len(students)}")
 
 def admin_delete_fingerprint():
     """Delete student fingerprint"""
-    database = load_fingerprint_database()
-    if not database:
+    # Get from both JSON (for fingerprint) and unified DB (for display)
+    json_database = load_fingerprint_database()
+    db_students = db.get_all_students()
+    
+    if not db_students:
         print("📁 No students enrolled.")
         return
     
@@ -220,24 +217,36 @@ def admin_delete_fingerprint():
     
     try:
         finger_id = get_user_input("Enter Fingerprint Slot ID to delete")
-        finger_id = get_user_input("Enter Slot ID to delete")
         
         if finger_id == "1":
             print("❌ Cannot delete admin slot. Use 'Change Admin' option.")
             return
             
-        if finger_id not in database:
+        # Find student in unified DB
+        student = None
+        for s in db_students:
+            if str(s.get('fingerprint_slot')) == finger_id:
+                student = s
+                break
+        
+        if not student:
             print("❌ Slot not found.")
             return
             
-        student_info = database[finger_id]
-        print(f"\n📋 Deleting: {student_info['name']} (ID: {student_info.get('student_id', 'N/A')})")
+        print(f"\n📋 Deleting: {student['full_name']} (ID: {student['student_id']})")
         
-        if confirm_action(f"Delete {student_info['name']}?", dangerous=True):
+        if confirm_action(f"Delete {student['full_name']}?", dangerous=True):
+            # Delete from fingerprint sensor
             if finger.delete_model(int(finger_id)) == adafruit_fingerprint.OK:
-                del database[finger_id]
-                save_fingerprint_database(database)
-                print(f"✅ Deleted {student_info['name']}")
+                # Update unified database (set fingerprint_slot to null)
+                db.update_student(student['student_id'], fingerprint_slot=None)
+                
+                # Remove from JSON database
+                if finger_id in json_database:
+                    del json_database[finger_id]
+                    save_fingerprint_database(json_database)
+                
+                print(f"✅ Deleted {student['full_name']}")
             else:
                 print("❌ Failed to delete from sensor.")
         else:
@@ -257,31 +266,33 @@ def admin_reset_all():
         return
     
     try:
+        # Clear fingerprint sensor
         if finger.empty_library() == adafruit_fingerprint.OK:
-            save_fingerprint_database({})
-            print("✅ All student fingerprint data has been reset.")
+            print("✅ Fingerprint sensor cleared.")
         else:
             print("❌ Failed to clear sensor database.")
 
-        database = load_fingerprint_database()
-        
-        # Delete all student fingerprints (preserve admin)
-        for slot_id in list(database.keys()):
-            if slot_id != "1":
-                finger.delete_model(int(slot_id))
-        
+        # Clear JSON database
         save_fingerprint_database({})
-        print("✅ All student data reset. Admin preserved.")
+        
+        # Clear unified database (but preserve students, just remove fingerprint associations)
+        students = db.get_all_students()
+        for student in students:
+            db.update_student(student['student_id'], fingerprint_slot=None)
+        
+        print("✅ All fingerprint associations reset. Student data preserved.")
         
     except Exception as e:
         print(f"❌ Reset error: {e}")
 
 def admin_sync_database():
-    """Sync database from Google Sheets"""
+    """FIXED: Sync database from Google Sheets to UNIFIED database"""
+    print("\n☁️  GOOGLE SHEETS SYNC TO UNIFIED DATABASE")
+    print("="*50)
+    
     try:
         import gspread
         from oauth2client.service_account import ServiceAccountCredentials
-        import sqlite3
         from datetime import datetime
         
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -291,35 +302,60 @@ def admin_sync_database():
         sheet = client.open("MotorPass (Responses)").sheet1
         rows = sheet.get_all_records()
         
-        conn = sqlite3.connect("database/students.db")
-        cursor = conn.cursor()
+        print(f"📥 Found {len(rows)} records in Google Sheets")
         
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS students (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                full_name TEXT NOT NULL,
-                license_number TEXT,
-                expiration_date TEXT,
-                course TEXT,
-                student_id TEXT UNIQUE,
-                synced_at TEXT
-            )
-        ''')
-        
-        cursor.execute("DELETE FROM students")
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        synced_count = 0
+        updated_count = 0
         
         for row in rows:
-            cursor.execute('''
-                INSERT INTO students (full_name, license_number, expiration_date, course, student_id, synced_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (row['Full Name'], row['License Number'], row['License Expiration Date'],
-                  row['Course'], row['Student No.'], current_time))
+            try:
+                student_id = row.get('Student No.', f'GS_{synced_count}')
+                full_name = row.get('Full Name', 'Unknown')
+                course = row.get('Course', None)
+                license_number = row.get('License Number', None)
+                license_expiration = row.get('License Expiration Date', None)
+                
+                # Check if student already exists
+                existing = db.get_student(student_id=student_id)
+                
+                if existing:
+                    # Update existing student with Google Sheets data
+                    db.update_student(
+                        student_id=student_id,
+                        full_name=full_name,
+                        course=course,
+                        license_number=license_number,
+                        license_expiration=license_expiration
+                    )
+                    print(f"  🔄 Updated: {full_name}")
+                    updated_count += 1
+                else:
+                    # Add new student
+                    success = db.add_student(
+                        student_id=student_id,
+                        full_name=full_name,
+                        course=course,
+                        license_number=license_number,
+                        license_expiration=license_expiration
+                    )
+                    
+                    if success:
+                        print(f"  ✅ Added: {full_name}")
+                        synced_count += 1
+                        
+            except Exception as e:
+                print(f"  ❌ Error processing row: {e}")
         
-        conn.commit()
-        conn.close()
-        print(f"✅ Synced {len(rows)} records.")
+        print(f"\n📊 SYNC COMPLETE:")
+        print(f"  New students: {synced_count}")
+        print(f"  Updated students: {updated_count}")
+        print(f"  Total in database: {len(db.get_all_students())}")
         
+    except ImportError:
+        print("❌ Google Sheets libraries not installed")
+        print("  Install with: pip install gspread oauth2client")
+    except FileNotFoundError:
+        print("❌ Google credentials not found: json_folder/credentials.json")
     except Exception as e:
         print(f"❌ Sync failed: {e}")
 
@@ -350,7 +386,6 @@ def admin_clear_time_records():
     else:
         print("❌ Failed to clear records.")
 
-
 def admin_change_fingerprint():
     """Change admin fingerprint (hidden option)"""
     print("\n🔄 CHANGE ADMIN FINGERPRINT")
@@ -364,6 +399,39 @@ def admin_change_fingerprint():
         print("✅ Admin fingerprint changed!")
     else:
         print("❌ Failed to change.")
+
+def admin_show_sync_status():
+    """Show sync status between different systems"""
+    print("\n📊 SYSTEM SYNC STATUS")
+    print("="*50)
+    
+    # Check JSON fingerprint database
+    json_file = "json_folder/fingerprint_database.json"
+    json_count = 0
+    if os.path.exists(json_file):
+        try:
+            with open(json_file, 'r') as f:
+                json_data = json.load(f)
+            json_count = len([k for k in json_data.keys() if k != "1"])  # Exclude admin
+        except:
+            pass
+    
+    # Check unified database
+    db_students = db.get_all_students()
+    db_count = len(db_students)
+    
+    # Check fingerprint associations
+    associated_count = len([s for s in db_students if s.get('fingerprint_slot')])
+    
+    print(f"📄 JSON Fingerprint Database: {json_count} students")
+    print(f"🗄️  Unified Database: {db_count} students")
+    print(f"🔗 With Fingerprint Association: {associated_count} students")
+    
+    if json_count != associated_count:
+        print(f"\n⚠️  SYNC NEEDED: {abs(json_count - associated_count)} students not synchronized")
+        print("   Run: python sync_all_data.py")
+    else:
+        print(f"\n✅ All systems synchronized!")
 
 # =================== MAIN ADMIN PANEL ===================
 
@@ -408,7 +476,8 @@ def admin_panel():
             "5": admin_sync_database,
             "6": admin_view_time_records,
             "7": admin_clear_time_records,
-            "0": admin_change_fingerprint  # Hidden option
+            "0": admin_change_fingerprint,  # Hidden option
+            "9": admin_show_sync_status      # Hidden sync status
         }
         
         if choice in actions:
@@ -416,5 +485,4 @@ def admin_panel():
         elif choice == "8":
             break
         else:
-            print("❌ Invalid option. Please try again.")
-            print("❌ Invalid option.")
+            print("❌ Invalid option. Try '9' for sync status.")
