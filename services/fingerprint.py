@@ -9,7 +9,7 @@ import tkinter as tk
 from tkinter import simpledialog, messagebox
 
 # Import database operations
-from database.db_operations import (
+from dashboard.database.db_operations import (
     get_student_by_id,
     get_student_time_status,
     record_time_in,

@@ -2,9 +2,8 @@
 
 from config import ADMIN_MENU
 from services.fingerprint import *
-from services.time_tracker import *
 
-from database.db_operations import (
+from dashboard.database.db_operations import (
     get_all_time_records,
     clear_all_time_records,
     get_students_currently_in,

@@ -10,8 +10,8 @@ from typing import Dict, List, Optional, Tuple, Any
 import secrets
 
 # Database Configuration
-DB_FILE = "database/motorpass.db"
-DB_VERSION = "1.0"
+DB_FILE = "dashboard/database/motorpass.db"
+DB_VERSION = "2.0"
 
 # Security Configuration
 SALT_LENGTH = 32

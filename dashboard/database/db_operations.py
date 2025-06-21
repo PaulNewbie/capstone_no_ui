@@ -5,7 +5,7 @@ import sqlite3
 from datetime import datetime
 
 # Import the new unified database system
-from database.unified_db import (
+from dashboard.database.unified_db import (
     MotorPassDatabase, db,
     initialize_all_databases,
     get_student_by_id,
