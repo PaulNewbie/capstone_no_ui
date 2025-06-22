@@ -33,7 +33,7 @@ VERIFICATION_KEYWORDS = [
     "Expiration Date", "EXPIRATION", "ADDRESS"
 ]
 
-MIN_KEYWORDS_FOR_SUCCESS = 5
+MIN_KEYWORDS_FOR_SUCCESS = 3
 MIN_CONFIDENCE_SCORE = 60
 
 @dataclass
@@ -287,7 +287,7 @@ def extract_name_from_lines(image_path: str, reference_name: str = "", best_ocr_
     full_text = " ".join(raw_text.splitlines()).upper()
     
     keywords_found = _count_verification_keywords(full_text)
-    is_verified = keywords_found >= 2
+    is_verified = keywords_found >= 1
     
     doc_status = "Driver's License Detected" if is_verified else "Unverified Document"
     name_info = {"Document Verified": doc_status}
