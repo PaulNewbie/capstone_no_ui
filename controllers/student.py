@@ -51,6 +51,8 @@ def student_verification():
     except Exception as e:
         print(f"❌ GUI Error: {e}")
         console_student_verification()
+    finally:
+        cleanup_camera()
 
 def console_student_verification():
     """Console-based verification"""
@@ -469,3 +471,20 @@ def _process_student_time_out(student_info):
         print("❌ Failed to record TIME OUT")
         set_led_idle()
         play_failure()
+        
+def cleanup_camera():
+    """Simple camera cleanup"""
+    try:
+        import cv2
+        cv2.destroyAllWindows()
+        
+        # Release any camera that might be in use
+        for i in range(3):
+            try:
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened():
+                    cap.release()
+            except:
+                pass
+    except:
+        pass

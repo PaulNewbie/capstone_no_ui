@@ -1,4 +1,4 @@
-# ui/main_window.py - Enhanced MotorPass GUI Interface with Time-In Count
+# ui/main_window.py - Enhanced with Better Resource Management
 
 import tkinter as tk
 from tkinter import messagebox
@@ -17,6 +17,12 @@ class MotorPassGUI:
         self.student_function = student_function
         self.guest_function = guest_function
         
+        # Add verification state tracking
+        self.verification_in_progress = False
+        self.clock_thread = None
+        self.counter_thread = None
+        self.is_closing = False
+        
         self.root = tk.Tk()
         self.root.title(f"{system_name} System v{system_version}")
         self.root.geometry("1366x768")  # Full HD resolution
@@ -31,8 +37,8 @@ class MotorPassGUI:
             # Fallback for other platforms
             self.root.attributes('-zoomed', True)
         
-        # Remove topmost for better usability
-        # self.root.attributes('-topmost', True)
+        # Add protocol for window closing
+        self.root.protocol("WM_DELETE_WINDOW", self.on_window_close)
         
         self.setup_window()
         self.start_clock()
@@ -200,35 +206,59 @@ class MotorPassGUI:
     def start_clock(self):
         """Start the clock update thread"""
         def update_clock():
-            while True:
+            while not self.is_closing:
                 try:
                     now = datetime.now()
                     time_str = now.strftime("%H:%M:%S")
                     date_str = now.strftime("%A, %B %d, %Y")
                     
-                    self.time_label.config(text=time_str)
-                    self.date_label.config(text=date_str)
+                    # Use after_idle to avoid conflicts
+                    if not self.is_closing:
+                        self.root.after_idle(lambda: self.update_clock_display(time_str, date_str))
                     
                     time.sleep(1)
-                except:
+                except Exception as e:
+                    print(f"Clock update error: {e}")
                     break
         
-        clock_thread = threading.Thread(target=update_clock, daemon=True)
-        clock_thread.start()
+        self.clock_thread = threading.Thread(target=update_clock, daemon=True)
+        self.clock_thread.start()
+    
+    def update_clock_display(self, time_str, date_str):
+        """Update clock display (called from main thread)"""
+        if not self.is_closing:
+            try:
+                self.time_label.config(text=time_str)
+                self.date_label.config(text=date_str)
+            except tk.TclError:
+                pass
     
     def start_time_in_counter(self):
         """Start the time-in counter update thread"""
         def update_counter():
-            while True:
+            while not self.is_closing:
                 try:
                     count = self.get_current_time_in_count()
-                    self.count_label.config(text=str(count))
+                    
+                    # Use after_idle to avoid conflicts
+                    if not self.is_closing:
+                        self.root.after_idle(lambda: self.update_counter_display(count))
+                    
                     time.sleep(5)  # Update every 5 seconds
-                except:
+                except Exception as e:
+                    print(f"Counter update error: {e}")
                     break
         
-        counter_thread = threading.Thread(target=update_counter, daemon=True)
-        counter_thread.start()
+        self.counter_thread = threading.Thread(target=update_counter, daemon=True)
+        self.counter_thread.start()
+    
+    def update_counter_display(self, count):
+        """Update counter display (called from main thread)"""
+        if not self.is_closing:
+            try:
+                self.count_label.config(text=str(count))
+            except tk.TclError:
+                pass
 
     def create_selection_interface(self):
         """Create modern transparent selection interface"""
@@ -308,41 +338,125 @@ class MotorPassGUI:
         btn.bind("<Leave>", on_leave)
         
     def student_clicked(self):
-        """Handle student button click"""
+        """Handle student button click with verification state check"""
+        if self.verification_in_progress:
+            messagebox.showwarning("Verification in Progress", 
+                                 "A verification process is already running. Please wait for it to complete.")
+            return
+        
         self.run_function(self.student_function, "Student Verification")
         
     def admin_clicked(self):
         """Handle admin button click"""
+        if self.verification_in_progress:
+            messagebox.showwarning("Verification in Progress", 
+                                 "A verification process is already running. Please wait for it to complete.")
+            return
+        
         self.run_function(self.admin_function, "Admin Panel")
         
     def guest_clicked(self):
         """Handle guest button click"""
+        if self.verification_in_progress:
+            messagebox.showwarning("Verification in Progress", 
+                                 "A verification process is already running. Please wait for it to complete.")
+            return
+        
         self.run_function(self.guest_function, "Guest Verification")
         
     def run_function(self, function, title):
-        """Hide GUI and run specified function"""
+        """Hide GUI and run specified function with proper state management"""
         try:
+            # Set verification in progress
+            self.verification_in_progress = True
+            
+            # Hide the main window
             self.root.withdraw()
+            
             print(f"\n{'='*50}")
             print(f"🚗 {title} Started")
             print(f"{'='*50}")
-            function()
-        except Exception as e:
-            messagebox.showerror("Error", f"An error occurred: {str(e)}")
-        finally:
-            self.root.deiconify()
             
+            # Run the function
+            function()
+            
+        except Exception as e:
+            print(f"Error in {title}: {e}")
+            messagebox.showerror("Error", f"An error occurred in {title}: {str(e)}")
+        finally:
+            # Always restore state
+            self.verification_in_progress = False
+            
+            # Clean up any resources
+            self.cleanup_verification_resources()
+            
+            # Show the main window again
+            if not self.is_closing:
+                try:
+                    self.root.deiconify()
+                    self.root.lift()  # Bring to front
+                    self.root.focus_force()  # Give focus
+                except tk.TclError:
+                    pass
+    
+    def cleanup_verification_resources(self):
+        """Clean up verification resources"""
+        try:
+            # Force cleanup of any OpenCV resources
+            import cv2
+            # Release any camera resources that might be hanging
+            for i in range(5):  # Check first 5 camera indices
+                try:
+                    cap = cv2.VideoCapture(i)
+                    if cap.isOpened():
+                        cap.release()
+                except:
+                    pass
+            cv2.destroyAllWindows()
+        except ImportError:
+            pass
+        except Exception as e:
+            print(f"Resource cleanup error: {e}")
+    
     def exit_system(self):
         """Exit the system with confirmation"""
+        if self.verification_in_progress:
+            messagebox.showwarning("Cannot Exit", 
+                                 "A verification process is running. Please wait for it to complete before exiting.")
+            return
+        
         if messagebox.askyesno("Exit System", "Are you sure you want to exit MotorPass?"):
+            self.on_window_close()
+    
+    def on_window_close(self):
+        """Handle window close event"""
+        if self.verification_in_progress:
+            messagebox.showwarning("Cannot Close", 
+                                 "A verification process is running. Please wait for it to complete.")
+            return
+        
+        self.is_closing = True
+        
+        # Clean up resources
+        self.cleanup_verification_resources()
+        
+        # Stop threads by setting flag (threads are daemon threads so they'll die with main process)
+        
+        try:
             self.root.quit()
+            self.root.destroy()
+        except:
+            pass
             
     def run(self):
         """Start the GUI application"""
         try:
+            # Bind window close protocol
+            self.root.protocol("WM_DELETE_WINDOW", self.on_window_close)
+            
             self.root.mainloop()
+        except Exception as e:
+            print(f"Main loop error: {e}")
         finally:
-            try:
-                self.root.destroy()
-            except:
-                pass
+            self.is_closing = True
+            self.cleanup_verification_resources()
