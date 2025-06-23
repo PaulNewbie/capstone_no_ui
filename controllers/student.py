@@ -19,10 +19,10 @@ import time
 from datetime import datetime
 
 def student_verification():
-    """Main student verification workflow with integrated time tracking and LED status"""
-    print("\n🎓 STUDENT VERIFICATION & TIME TRACKING SYSTEM")
+    """Main student/staff verification workflow with integrated time tracking and LED status"""
+    print("\n🎓👔 STUDENT/STAFF VERIFICATION & TIME TRACKING SYSTEM")
     
-    # Set LED to processing state when student verification starts
+    # Set LED to processing state when verification starts
     set_led_processing()
     
     # Step 1: Helmet verification (always required)
@@ -35,22 +35,25 @@ def student_verification():
     
     # Step 2: Fingerprint authentication
     print("🔒 Place your finger on the sensor...")
-    student_info = authenticate_fingerprint()
+    user_info = authenticate_fingerprint()
     
-    if not student_info:
+    if not user_info:
         print("❌ Authentication failed")
         set_led_idle()
         input("\n📱 Press Enter to return to main menu...")
         return
     
-    print(f"✅ {student_info['name']} (ID: {student_info['student_id']})")
+    user_type = user_info.get('user_type', 'STUDENT')
+    user_type_display = "Student" if user_type == 'STUDENT' else "Staff"
+    
+    print(f"✅ {user_info['name']} ({user_type_display} - ID: {user_info['unified_id']})")
     
     # Step 3: Check current time status first
-    current_status = get_student_time_status(student_info['student_id'])
+    current_status = get_student_time_status(user_info['unified_id'])
     
     # Step 4: License expiration check (only for TIME IN)
     if current_status == 'OUT' or current_status is None:
-        license_expiration_valid = check_license_expiration(student_info)
+        license_expiration_valid = check_license_expiration(user_info)
         if not license_expiration_valid:
             print("❌ License expired")
             set_led_idle()
@@ -58,12 +61,12 @@ def student_verification():
             return
     
     if current_status == 'OUT' or current_status is None:
-        # Student is timing IN - full verification required
-        print("🟢 TIMING IN - Starting license verification...")
+        # User is timing IN - full verification required
+        print(f"🟢 TIMING IN - Starting license verification for {user_type_display}...")
         
         # Capture and verify license
-        image_path = auto_capture_license_rpi(reference_name=student_info['name'], 
-                                           fingerprint_info=student_info)
+        image_path = auto_capture_license_rpi(reference_name=user_info['name'], 
+                                           fingerprint_info=user_info)
         
         if not image_path:
             print("❌ License capture failed")
@@ -73,13 +76,13 @@ def student_verification():
         
         is_fully_verified = complete_verification_flow(
             image_path=image_path,
-            fingerprint_info=student_info,
+            fingerprint_info=user_info,
             helmet_verified=True,
             license_expiration_valid=license_expiration_valid
         )
         
         if is_fully_verified:
-            if record_time_in(student_info):
+            if record_time_in(user_info):
                 print(f"✅ TIME IN SUCCESSFUL - {time.strftime('%H:%M:%S')}")
                 set_led_success(duration=5.0)
             else:
@@ -90,11 +93,11 @@ def student_verification():
             set_led_idle()
         
     else:
-        # Student is timing OUT - only helmet + fingerprint required
-        print("🔴 TIMING OUT...")
+        # User is timing OUT - only helmet + fingerprint required
+        print(f"🔴 TIMING OUT {user_type_display}...")
         print("🛡️ Drive safe!")
         
-        if record_time_out(student_info):
+        if record_time_out(user_info):
             print(f"✅ TIME OUT SUCCESSFUL - {time.strftime('%H:%M:%S')}")
             set_led_success(duration=5.0)
         else:
@@ -102,7 +105,7 @@ def student_verification():
             set_led_idle()
     
     input("\n📱 Press Enter to return to main menu...")
-
+    
 def check_license_expiration(student_info):
     """Check if student's license is expired - simplified logging"""
     try:

@@ -8,9 +8,10 @@ import os
 import tkinter as tk
 from tkinter import simpledialog, messagebox
 
+
 # Import database operations
 from database.db_operations import (
-    get_student_by_id,
+    get_user_by_id,
     get_student_time_status,
     record_time_in,
     record_time_out,
@@ -58,44 +59,62 @@ def load_admin_database():
 
 # =================== GUI FUNCTIONS ===================
 
-def get_student_id_gui():
-    """Get student ID via GUI and fetch info"""
+def get_user_id_gui():
+    """Get user ID via GUI and fetch info (works for both students and staff)"""
     root = tk.Tk()
     root.withdraw()
     
     while True:
-        student_id = simpledialog.askstring("Student Enrollment", "Enter Student Number:")
+        user_id = simpledialog.askstring("User Enrollment", 
+                                        "Enter Student No. or Staff No.:")
         
-        if not student_id:
+        if not user_id:
             root.destroy()
             return None
         
-        student_id = student_id.strip()
-        student_info = get_student_by_id(student_id)
+        user_id = user_id.strip()
+        user_info = get_user_by_id(user_id)  # This function now handles both types
         
-        if student_info:
-            confirmation_message = f"""
+        if user_info:
+            # Determine display information based on user type
+            if user_info['user_type'] == 'STUDENT':
+                confirmation_message = f"""
 Student Information Found:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-👤 Name: {student_info['full_name']}
-🆔 Student No.: {student_info['student_id']}
-📚 Course: {student_info['course']}
-🪪 License No.: {student_info['license_number']}
-📅 License Exp.: {student_info['expiration_date']}
+👤 Name: {user_info['full_name']}
+🆔 Student No.: {user_info['student_id']}
+📚 Course: {user_info['course']}
+🪪 License No.: {user_info['license_number']}
+📅 License Exp.: {user_info['expiration_date']}
+🏍️ Plate No.: {user_info['plate_number']}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Proceed with fingerprint enrollment?
+            """
+            else:  # STAFF
+                confirmation_message = f"""
+Staff Information Found:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+👤 Name: {user_info['full_name']}
+🆔 Staff No.: {user_info['staff_no']}
+👔 Role: {user_info['staff_role']}
+🪪 License No.: {user_info['license_number']}
+📅 License Exp.: {user_info['expiration_date']}
+🏍️ Plate No.: {user_info['plate_number']}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Proceed with fingerprint enrollment?
             """
             
-            if messagebox.askyesno("Confirm Student Information", confirmation_message):
+            if messagebox.askyesno("Confirm User Information", confirmation_message):
                 root.destroy()
-                return student_info
+                return user_info
         else:
-            if not messagebox.askyesno("Student Not Found", 
-                f"Student ID '{student_id}' not found.\n\nTry again?"):
+            if not messagebox.askyesno("User Not Found", 
+                f"User ID '{user_id}' not found.\n\nTry again?"):
                 root.destroy()
                 return None
-
+                
 def show_message_gui(title, message):
     """Show message dialog"""
     root = tk.Tk()
@@ -103,16 +122,27 @@ def show_message_gui(title, message):
     messagebox.showinfo(title, message)
     root.destroy()
 
-def display_student_info(student_info):
-    """Display student info in console"""
+def display_user_info(user_info):
+    """Display user info in console (works for both students and staff)"""
     print(f"\n{'='*50}")
-    print("📋 STUDENT INFORMATION")
-    print(f"{'='*50}")
-    print(f"👤 Name: {student_info['full_name']}")
-    print(f"🆔 Student No.: {student_info['student_id']}")
-    print(f"📚 Course: {student_info['course']}")
-    print(f"🪪 License: {student_info['license_number']}")
-    print(f"📅 Expiration: {student_info['expiration_date']}")
+    if user_info['user_type'] == 'STUDENT':
+        print("📋 STUDENT INFORMATION")
+        print(f"{'='*50}")
+        print(f"👤 Name: {user_info['full_name']}")
+        print(f"🆔 Student No.: {user_info['student_id']}")
+        print(f"📚 Course: {user_info['course']}")
+        print(f"🪪 License: {user_info['license_number']}")
+        print(f"📅 Expiration: {user_info['expiration_date']}")
+        print(f"🏍️ Plate: {user_info['plate_number']}")
+    else:  # STAFF
+        print("📋 STAFF INFORMATION")
+        print(f"{'='*50}")
+        print(f"👤 Name: {user_info['full_name']}")
+        print(f"🆔 Staff No.: {user_info['staff_no']}")
+        print(f"👔 Role: {user_info['staff_role']}")
+        print(f"🪪 License: {user_info['license_number']}")
+        print(f"📅 Expiration: {user_info['expiration_date']}")
+        print(f"🏍️ Plate: {user_info['plate_number']}")
     print(f"{'='*50}")
 
 # =================== FINGERPRINT HELPER FUNCTIONS ===================
@@ -148,19 +178,19 @@ def _process_fingerprint_template(template_num):
 
 # =================== FINGERPRINT FUNCTIONS ===================
 
-def enroll_finger_with_student_info(location):
-    """Enhanced enrollment using Student ID with retry mechanism"""
+def enroll_finger_with_user_info(location):
+    """Enhanced enrollment using Student ID or Staff No with retry mechanism"""
     print(f"\n🔒 Starting enrollment for slot #{location}")
     
-    student_info = get_student_id_gui()
-    if not student_info:
-        print("❌ No student selected.")
+    user_info = get_user_id_gui()  # Updated function name
+    if not user_info:
+        print("❌ No user selected.")
         return False
     
-    display_student_info(student_info)
-    print(f"👤 Enrolling: {student_info['full_name']}")
+    display_user_info(user_info)  # Updated function name
+    print(f"👤 Enrolling: {user_info['full_name']} ({user_info['user_type']})")
     
-    # Fingerprint enrollment process with retry
+    # Fingerprint enrollment process with retry (same as before)
     for fingerimg in range(1, 3):
         max_attempts = 5
         success = False
@@ -198,27 +228,48 @@ def enroll_finger_with_student_info(location):
     if finger.store_model(location) == adafruit_fingerprint.OK:
         print("✅")
         
-        # Save student info
+        # Save user info to fingerprint database
         database = load_fingerprint_database()
         database[str(location)] = {
-            "name": student_info['full_name'],
-            "student_id": student_info['student_id'],
-            "course": student_info['course'],
-            "license_number": student_info['license_number'],
-            "license_expiration": student_info['expiration_date'],
+            "name": user_info['full_name'],
+            "user_type": user_info['user_type'],
+            "student_id": user_info.get('student_id', ''),
+            "staff_no": user_info.get('staff_no', ''),
+            "unified_id": user_info['unified_id'],  # For time tracking
+            "course": user_info.get('course', ''),
+            "staff_role": user_info.get('staff_role', ''),
+            "license_number": user_info['license_number'],
+            "license_expiration": user_info['expiration_date'],
+            "plate_number": user_info['plate_number'],
             "enrolled_date": time.strftime("%Y-%m-%d %H:%M:%S")
         }
         save_fingerprint_database(database)
         
-        print(f"🎉 Successfully enrolled {student_info['full_name']} at slot #{location}")
+        print(f"🎉 Successfully enrolled {user_info['full_name']} ({user_info['user_type']}) at slot #{location}")
         
-        success_message = f"""
+        # Create success message based on user type
+        if user_info['user_type'] == 'STUDENT':
+            success_message = f"""
 Enrollment Successful! ✅
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-👤 Student: {student_info['full_name']}
-🆔 Student No.: {student_info['student_id']}
-📚 Course: {student_info['course']}
-🪪 License: {student_info['license_number']}
+👤 Student: {user_info['full_name']}
+🆔 Student No.: {user_info['student_id']}
+📚 Course: {user_info['course']}
+🪪 License: {user_info['license_number']}
+🏍️ Plate: {user_info['plate_number']}
+🔒 Fingerprint Slot: #{location}
+📅 Enrolled: {time.strftime("%Y-%m-%d %H:%M:%S")}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        """
+        else:  # STAFF
+            success_message = f"""
+Enrollment Successful! ✅
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+👤 Staff: {user_info['full_name']}
+🆔 Staff No.: {user_info['staff_no']}
+👔 Role: {user_info['staff_role']}
+🪪 License: {user_info['license_number']}
+🏍️ Plate: {user_info['plate_number']}
 🔒 Fingerprint Slot: #{location}
 📅 Enrolled: {time.strftime("%Y-%m-%d %H:%M:%S")}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -229,9 +280,9 @@ Enrollment Successful! ✅
     else:
         print("❌ Storage failed")
         return False
-
+        
 def authenticate_fingerprint(max_attempts=3):
-    """Authenticate fingerprint and return student info with retry mechanism"""
+    """Authenticate fingerprint and return user info with retry mechanism - Updated for Students & Staff"""
     attempts = 0
     
     while attempts < max_attempts:
@@ -269,43 +320,58 @@ def authenticate_fingerprint(max_attempts=3):
                 print("❌ Maximum attempts reached. No match found.")
                 return None
         
-        # Authentication successful - get student info
+        # Authentication successful - get user info
         database = load_fingerprint_database()
         finger_id = str(finger.finger_id)
         
         if finger_id in database:
-            student_info = database[finger_id]
+            user_info = database[finger_id]
+            user_type = user_info.get('user_type', 'STUDENT')
+            
             print(f"✅ Authentication successful!")
-            print(f"👤 Welcome: {student_info['name']}")
-            print(f"🆔 ID: {student_info.get('student_id', 'N/A')}")
-            print(f"📚 Course: {student_info.get('course', 'N/A')}")
+            print(f"👤 Welcome: {user_info['name']} ({user_type})")
+            
+            if user_type == 'STUDENT':
+                print(f"🆔 Student ID: {user_info.get('student_id', 'N/A')}")
+                print(f"📚 Course: {user_info.get('course', 'N/A')}")
+            else:  # STAFF
+                print(f"🆔 Staff No.: {user_info.get('staff_no', 'N/A')}")
+                print(f"👔 Role: {user_info.get('staff_role', 'N/A')}")
+            
             print(f"🎯 Confidence: {finger.confidence}")
             
+            # Return standardized user info for time tracking
             return {
-                "name": student_info['name'],
-                "student_id": student_info.get('student_id', 'N/A'),
-                "course": student_info.get('course', 'N/A'),
-                "license_number": student_info.get('license_number', 'N/A'),
-                "license_expiration": student_info.get('license_expiration', 'N/A'),
+                "name": user_info['name'],
+                "student_id": user_info.get('unified_id', user_info.get('student_id', user_info.get('staff_no', 'N/A'))),
+                "unified_id": user_info.get('unified_id', user_info.get('student_id', user_info.get('staff_no', 'N/A'))),
+                "user_type": user_type,
+                "course": user_info.get('course', user_info.get('staff_role', 'N/A')),
+                "license_number": user_info.get('license_number', 'N/A'),
+                "license_expiration": user_info.get('license_expiration', 'N/A'),
+                "plate_number": user_info.get('plate_number', 'N/A'),
                 "finger_id": finger.finger_id,
                 "confidence": finger.confidence,
-                "enrolled_date": student_info.get('enrolled_date', 'Unknown')
+                "enrolled_date": user_info.get('enrolled_date', 'Unknown')
             }
         else:
-            print(f"⚠️ Fingerprint recognized (ID: {finger.finger_id}) but no student data found")
+            print(f"⚠️ Fingerprint recognized (ID: {finger.finger_id}) but no user data found")
             return {
                 "name": f"Unknown User (ID: {finger.finger_id})",
                 "student_id": "N/A",
+                "unified_id": "N/A",
+                "user_type": "UNKNOWN",
                 "course": "N/A",
                 "license_number": "N/A",
                 "license_expiration": "N/A",
+                "plate_number": "N/A",
                 "finger_id": finger.finger_id,
                 "confidence": finger.confidence,
                 "enrolled_date": "Unknown"
             }
     
     return None
-
+    
 def authenticate_admin(max_attempts=3):
     """Authenticate admin using fingerprint with retry mechanism"""
     attempts = 0
@@ -391,5 +457,4 @@ def authenticate_fingerprint_custom_retry(max_attempts=3):
 
 def enroll_finger_with_name(location):
     """Legacy function - redirects to new enrollment"""
-    print("⚠️ Using legacy enrollment. Consider using enroll_finger_with_student_info().")
-    return enroll_finger_with_student_info(location)
+    return enroll_finger_with_user_info(location)

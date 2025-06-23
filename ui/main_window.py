@@ -277,7 +277,7 @@ class MotorPassGUI:
         buttons_frame.pack(fill="both", expand=True, padx=40, pady=20)
         
         # Create user type buttons with modern styling
-        self.create_modern_button(buttons_frame, "STUDENT", self.student_clicked, "#DAA520")
+        self.create_modern_button(buttons_frame, "STUDENT/STAFF", self.student_staff_clicked, "#DAA520")
         self.create_modern_button(buttons_frame, "GUEST", self.guest_clicked, "#DAA520")
         self.create_modern_button(buttons_frame, "ADMIN", self.admin_clicked, "#DAA520")
         
@@ -322,9 +322,9 @@ class MotorPassGUI:
         btn.bind("<Enter>", on_enter)
         btn.bind("<Leave>", on_leave)
         
-    def student_clicked(self):
+    def student_staff_clicked(self):
         """Handle student button click"""
-        self.run_function(self.student_function, "Student Verification")
+        self.run_function(self.student_function, "Student/Staff Verification")
         
     def admin_clicked(self):
         """Handle admin button click"""

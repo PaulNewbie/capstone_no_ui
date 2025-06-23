@@ -16,8 +16,7 @@ from utils.display_helpers import (
 	display_menu, 
 	get_user_input, 
 	confirm_action, 
-	display_separator, 
-	get_num 
+	display_separator
 )
 
 import time
@@ -42,6 +41,32 @@ def save_admin_database(database):
     os.makedirs("json_folder", exist_ok=True)
     with open("json_folder/admin_database.json", 'w') as f:
         json.dump(database, f, indent=4)
+        
+# =================== SLOT MANAGEMENT FUNCTIONS ===================
+
+def find_next_available_slot():
+    """Automatically find the next available slot (skips slot 1 for admin)"""
+    try:
+        # Read current templates from sensor
+        if finger.read_templates() != adafruit_fingerprint.OK:
+            print("❌ Failed to read sensor templates")
+            return None
+        
+        # Load fingerprint database
+        database = load_fingerprint_database()
+        
+        # Find next available slot starting from 2 (skip admin slot 1)
+        for slot in range(2, finger.library_size + 1):
+            if str(slot) not in database:
+                print(f"🎯 Auto-assigned slot: #{slot}")
+                return slot
+        
+        print("❌ No available slots found")
+        return None
+        
+    except Exception as e:
+        print(f"❌ Error finding available slot: {e}")
+        return None
 
 # =================== ADMIN AUTHENTICATION ===================
 
@@ -161,7 +186,7 @@ def authenticate_admin():
 
 # =================== ADMIN FUNCTIONS ===================
 def admin_enroll():
-    """Enroll new student"""
+    """Enroll new user (student or staff)"""
     if finger.read_templates() != adafruit_fingerprint.OK:
         print("❌ Failed to read templates")
         return
@@ -169,58 +194,74 @@ def admin_enroll():
     print(f"📊 Current enrollments: {finger.template_count}")
 
     # Get slot (skip admin slot 1)
-    location = get_num(finger.library_size)
+    location = find_next_available_slot()
     if location == 1:
         print("❌ Slot #1 reserved for admin. Use slot 2+")
         return
     
-    success = enroll_finger_with_student_info(location)
+    success = enroll_finger_with_user_info(location)  
     print(f"{'✅ Success!' if success else '❌ Failed.'}")
 
 def admin_view_enrolled():
-    """Display all enrolled students"""
+    """Display all enrolled users (students and staff)"""
     database = load_fingerprint_database()
     if not database:
-        print("📁 No students enrolled.")
+        print("📁 No users enrolled.")
         return
     
-    print("\n👥 ENROLLED STUDENTS:")
+    print("\n👥 ENROLLED USERS:")
     display_separator()
     
-    student_count = 0  # Initialize student_count
+    student_count = 0
+    staff_count = 0
     
     for finger_id, info in database.items():
         # Skip admin slot
         if finger_id == "1":
             continue
-            
-        student_count += 1
+        
+        user_type = info.get('user_type', 'STUDENT')
+        
+        if user_type == 'STUDENT':
+            student_count += 1
+        else:
+            staff_count += 1
         
         print(f"🆔 Slot: {finger_id}")
         print(f"👤 Name: {info['name']}")
-        print(f"🎓 Student ID: {info.get('student_id', 'N/A')}")
-        print(f"📚 Course: {info.get('course', 'N/A')}")
+        print(f"👥 Type: {user_type}")
+        
+        if user_type == 'STUDENT':
+            print(f"🎓 Student ID: {info.get('student_id', 'N/A')}")
+            print(f"📚 Course: {info.get('course', 'N/A')}")
+        else:  # STAFF
+            print(f"👔 Staff No.: {info.get('staff_no', 'N/A')}")
+            print(f"💼 Role: {info.get('staff_role', 'N/A')}")
+        
         print(f"🪪 License: {info.get('license_number', 'N/A')}")
         print(f"📅 License Exp: {info.get('license_expiration', 'N/A')}")
+        print(f"🏍️ Plate: {info.get('plate_number', 'N/A')}")
         print(f"🕒 Enrolled: {info.get('enrolled_date', 'Unknown')}")
         print("-" * 50)
     
-    if student_count == 0:
-        print("📁 No students enrolled.")
+    total_count = student_count + staff_count
+    if total_count == 0:
+        print("📁 No users enrolled.")
     else:
-        print(f"\n📊 Total Students: {student_count}")
-
+        print(f"\n📊 Total Users: {total_count}")
+        print(f"   🎓 Students: {student_count}")
+        print(f"   👔 Staff: {staff_count}")
+        
 def admin_delete_fingerprint():
-    """Delete student fingerprint"""
+    """Delete user fingerprint"""
     database = load_fingerprint_database()
     if not database:
-        print("📁 No students enrolled.")
+        print("📁 No users enrolled.")
         return
     
     admin_view_enrolled()
     
     try:
-        finger_id = get_user_input("Enter Fingerprint Slot ID to delete")
         finger_id = get_user_input("Enter Slot ID to delete")
         
         if finger_id == "1":
@@ -231,14 +272,17 @@ def admin_delete_fingerprint():
             print("❌ Slot not found.")
             return
             
-        student_info = database[finger_id]
-        print(f"\n📋 Deleting: {student_info['name']} (ID: {student_info.get('student_id', 'N/A')})")
+        user_info = database[finger_id]
+        user_type = user_info.get('user_type', 'STUDENT')
+        user_id = user_info.get('student_id' if user_type == 'STUDENT' else 'staff_no', 'N/A')
         
-        if confirm_action(f"Delete {student_info['name']}?", dangerous=True):
+        print(f"\n📋 Deleting: {user_info['name']} ({user_type} - ID: {user_id})")
+        
+        if confirm_action(f"Delete {user_info['name']}?", dangerous=True):
             if finger.delete_model(int(finger_id)) == adafruit_fingerprint.OK:
                 del database[finger_id]
                 save_fingerprint_database(database)
-                print(f"✅ Deleted {student_info['name']}")
+                print(f"✅ Deleted {user_info['name']}")
             else:
                 print("❌ Failed to delete from sensor.")
         else:
@@ -246,7 +290,7 @@ def admin_delete_fingerprint():
             
     except ValueError:
         print("❌ Invalid slot ID.")
-
+        
 def admin_reset_all():
     """Reset all system data with confirmation"""
     if not confirm_action("Delete ALL student fingerprints?", dangerous=True):
@@ -278,54 +322,123 @@ def admin_reset_all():
         print(f"❌ Reset error: {e}")
 
 def admin_sync_database():
-    """Sync database from Google Sheets"""
+    """Sync database from Google Sheets - Updated for Students & Staff"""
     try:
         import gspread
         from oauth2client.service_account import ServiceAccountCredentials
         import sqlite3
         from datetime import datetime
         
+        print("🔄 Starting database sync...")
+        
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_name("json_folder/credentials.json", scope)
         client = gspread.authorize(creds)
         
-        sheet = client.open("MotorPass (Responses)").sheet1
+        sheet = client.open("MotorPass Registration Form (Responses)").sheet1
         rows = sheet.get_all_records()
         
         conn = sqlite3.connect("database/students.db")
         cursor = conn.cursor()
         
+        # Create new table with updated schema
+        cursor.execute('DROP TABLE IF EXISTS students')
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS students (
+            CREATE TABLE students (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 full_name TEXT NOT NULL,
                 license_number TEXT,
                 expiration_date TEXT,
+                plate_number TEXT,
                 course TEXT,
-                student_id TEXT UNIQUE,
-                synced_at TEXT
+                student_id TEXT,
+                staff_role TEXT,
+                staff_no TEXT,
+                user_type TEXT NOT NULL,
+                synced_at TEXT,
+                UNIQUE(student_id, staff_no)
             )
         ''')
         
-        cursor.execute("DELETE FROM students")
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        students_count = 0
+        staff_count = 0
         
         for row in rows:
-            cursor.execute('''
-                INSERT INTO students (full_name, license_number, expiration_date, course, student_id, synced_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (row['Full Name'], row['License Number'], row['License Expiration Date'],
-                  row['Course'], row['Student No.'], current_time))
+            try:
+                # Extract data from row
+                full_name = row.get('Full Name', '').strip()
+                license_number = row.get('License Number', '').strip()
+                expiration_date = row.get('License Expiration Date', '').strip()
+                plate_number = row.get('Plate Number of the Motorcycle', '').strip()
+                course = row.get('Course', '').strip()
+                student_id = row.get('Student No.', '').strip()
+                staff_role = row.get('Staff Role', '').strip()
+                staff_no = row.get('Staff No.', '').strip()
+                
+                # Skip if no name
+                if not full_name:
+                    continue
+                
+                # Determine user type based on filled fields
+                if student_id and not staff_no:
+                    # This is a student
+                    user_type = 'STUDENT'
+                    cursor.execute('''
+                        INSERT INTO students (full_name, license_number, expiration_date, plate_number, 
+                                            course, student_id, staff_role, staff_no, user_type, synced_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (full_name, license_number, expiration_date, plate_number,
+                          course, student_id, None, None, user_type, current_time))
+                    students_count += 1
+                    
+                elif staff_no and not student_id:
+                    # This is a staff member
+                    user_type = 'STAFF'
+                    cursor.execute('''
+                        INSERT INTO students (full_name, license_number, expiration_date, plate_number, 
+                                            course, student_id, staff_role, staff_no, user_type, synced_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (full_name, license_number, expiration_date, plate_number,
+                          None, None, staff_role, staff_no, user_type, current_time))
+                    staff_count += 1
+                    
+                elif student_id and staff_no:
+                    # Both fields filled - this shouldn't happen, but handle gracefully
+                    print(f"⚠️ Warning: Both Student No. and Staff No. filled for {full_name}")
+                    # Default to student if both are filled
+                    user_type = 'STUDENT'
+                    cursor.execute('''
+                        INSERT INTO students (full_name, license_number, expiration_date, plate_number, 
+                                            course, student_id, staff_role, staff_no, user_type, synced_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (full_name, license_number, expiration_date, plate_number,
+                          course, student_id, None, None, user_type, current_time))
+                    students_count += 1
+                else:
+                    # Neither student nor staff ID filled
+                    print(f"⚠️ Skipping {full_name} - No Student No. or Staff No.")
+                    continue
+                    
+            except Exception as e:
+                print(f"❌ Error processing row for {row.get('Full Name', 'Unknown')}: {e}")
+                continue
         
         conn.commit()
         conn.close()
-        print(f"✅ Synced {len(rows)} records.")
+        
+        total_synced = students_count + staff_count
+        print(f"✅ Database sync completed!")
+        print(f"📊 Synced {total_synced} records:")
+        print(f"   🎓 Students: {students_count}")
+        print(f"   👔 Staff: {staff_count}")
         
     except Exception as e:
         print(f"❌ Sync failed: {e}")
-
+        print("💡 Check your credentials.json and internet connection")
+        
 def admin_view_time_records():
-    """View all time records"""
+    """View all time records with user type information"""
     records = get_all_time_records()
     if not records:
         print("📁 No time records.")
@@ -336,7 +449,9 @@ def admin_view_time_records():
     
     for record in records:
         status_icon = "🟢" if record['status'] == 'IN' else "🔴"
-        print(f"{status_icon} {record['student_name']} ({record['student_id']})")
+        user_type_icon = "🎓" if record.get('user_type', 'STUDENT') == 'STUDENT' else "👔"
+        
+        print(f"{status_icon} {user_type_icon} {record['student_name']} ({record['student_id']})")
         print(f"   📅 {record['date']} 🕒 {record['time']} 📊 {record['status']}")
         print("-" * 50)
 

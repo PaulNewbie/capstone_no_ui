@@ -1,4 +1,4 @@
-# services/license_reader.py - Cleaned and Simplified
+# services/license_reader.py - Enhanced with ROI focus and stability tracking
 
 import cv2
 import numpy as np
@@ -24,7 +24,7 @@ OCR_CONFIG_DETAILED = '--psm 4 --oem 3'
 OPTIMAL_WIDTH, OPTIMAL_HEIGHT = 1280, 960
 MIN_WIDTH, MIN_HEIGHT = 640, 480
 CACHE_DIR = "cache/ocr"
-MAX_CACHE_FILES = 5
+MAX_CACHE_FILES = 10  # Increased from 5
 
 VERIFICATION_KEYWORDS = [
     "REPUBLIC", "PHILIPPINES", "DEPARTMENT", "TRANSPORTATION", 
@@ -34,7 +34,7 @@ VERIFICATION_KEYWORDS = [
     "Expiration Date", "EXPIRATION", "ADDRESS"
 ]
 
-MIN_KEYWORDS_FOR_SUCCESS = 2
+MIN_KEYWORDS_FOR_SUCCESS = 3
 MIN_CONFIDENCE_SCORE = 60
 
 @dataclass
@@ -260,6 +260,11 @@ def find_best_line_match(input_name: str, ocr_lines: List[str]) -> Tuple[Optiona
         line_clean = line.strip()
         if not line_clean:
             continue
+        
+        # Skip short names (4 letters or less without spaces/punctuation)
+        name_letters_only = line_clean.replace(",", "").replace(".", "").replace(" ", "")
+        if len(name_letters_only) <= 4:
+            continue
             
         score = difflib.SequenceMatcher(None, input_name.lower(), line_clean.lower()).ratio()
         
@@ -302,9 +307,21 @@ def extract_name_from_lines(image_path: str, reference_name: str = "", best_ocr_
     full_text = " ".join(raw_text.splitlines()).upper()
     
     keywords_found = _count_verification_keywords(full_text)
-    is_verified = keywords_found >= 2
     
-    doc_status = "Driver's License Detected" if is_verified else "Unverified Document"
+    # NEW: Check if names match - if they do, always consider license detected
+    name_matches = False
+    if reference_name and match_score >= 0.65:
+        name_matches = True
+        print(f"🎯 Name match detected ({match_score*100:.1f}%) - License validation override applied")
+    
+    # Override license detection if names match
+    if name_matches:
+        is_verified = True  # Force verification to true when names match
+        doc_status = "Driver's License Detected (Name Match Override)"
+    else:
+        is_verified = keywords_found >= 1
+        doc_status = "Driver's License Detected" if is_verified else "Unverified Document"
+    
     name_info = {"Document Verified": doc_status}
     
     # Check match confidence levels
@@ -348,10 +365,12 @@ def extract_guest_name_from_license_simple(image_path: str) -> Dict[str, str]:
     }
 
 def extract_guest_name_from_license(ocr_lines: List[str]) -> str:
+    # Enhanced filter keywords
     filter_keywords = [
         'ROAD', 'STREET', 'AVENUE', 'DISTRICT', 'CITY', 'PROVINCE', 'MARILAO', 'BULACAN',
         'BARANGAY', 'REPUBLIC', 'PHILIPPINES', 'TRANSPORTATION', 
-        'DRIVER', 'LICENSE', 'NATIONALITY', 'ADDRESS', 'WEIGHT', 'HEIGHT'
+        'DRIVER', 'LICENSE', 'NATIONALITY', 'ADDRESS', 'WEIGHT', 'HEIGHT',
+        'LN', 'FNMN'  
     ]
     
     potential_names = []
@@ -364,9 +383,20 @@ def extract_guest_name_from_license(ocr_lines: List[str]) -> str:
             any(char.isdigit() for char in line_clean)):
             continue
         
+        # Check if it's alphabetic (with spaces and commas allowed)
         if line_clean.replace(" ", "").replace(",", "").isalpha() and " " in line_clean:
+            # Additional check: ensure the actual name content (without punctuation) is long enough
+            name_content = line_clean.replace(",", "").replace(".", "").strip()
+            if len(name_content.replace(" ", "")) <= 4:  # Skip if 4 letters or less
+                continue
+            
+            # Check that each word has minimum length
+            words = name_content.split()
+            if any(len(word) < 2 for word in words):  # Skip if any word is less than 2 characters
+                continue
+                
             score = 0
-            if "," in line_clean: score += 10
+            if "," in line_clean: score += 10  # Last, First format
             word_count = len(line_clean.split())
             if 2 <= word_count <= 4: score += 5
             if 10 <= len(line_clean) <= 30: score += 3
@@ -380,12 +410,24 @@ def extract_guest_name_from_license(ocr_lines: List[str]) -> str:
     return "Guest"
 
 def _format_extracted_name_simple(name: str) -> str:
+    # First check if the name has enough actual letters
+    name_letters_only = name.replace(",", "").replace(".", "").replace(" ", "")
+    if len(name_letters_only) <= 4:  # Reject names with 4 letters or less
+        return "Guest"
+    
     if ',' in name:
         parts = name.split(',')
         if len(parts) == 2:
             last_name = parts[0].strip().title()
             first_part = parts[1].strip().title()
+            # Final check after formatting
+            if len(last_name.replace(" ", "")) + len(first_part.replace(" ", "")) <= 4:
+                return "Guest"
             return f"{first_part} {last_name}"
+    
+    # Final check for non-comma names
+    if len(name.replace(" ", "")) <= 4:
+        return "Guest"
     
     return name.title()
 
@@ -400,7 +442,8 @@ def _detect_name_pattern(raw_text: str) -> Optional[str]:
         'DATE OF BIRTH', 'EXPIRATION', 'AGENCY CODE', 'CONDITIONS',
         'EYES COLOR', 'WEIGHT', 'HEIGHT', 'BLOOD TYPE', 'RESTRICTION',
         'SIGNATURE', 'PHOTO', 'FIRST NAME', 'LAST NAME', 'MIDDLE NAME',
-        'CITY', 'PROVINCE', 'BARANGAY', 'STREET', 'ROAD', 'AVENUE'
+        'CITY', 'PROVINCE', 'BARANGAY', 'STREET', 'ROAD', 'AVENUE',
+        'LN', 'FNMN', 'RESIDENCIA', 'BLK', 'LOT'  # Added new keywords
     ]
     
     for line in lines:
@@ -420,6 +463,16 @@ def _detect_name_pattern(raw_text: str) -> Optional[str]:
             
         # Clean the line for final check
         clean = re.sub(r"[^A-Z\s,]", "", line_upper).strip()
+        
+        # Additional check: ensure the actual name content (without punctuation) is long enough
+        name_content = clean.replace(",", "").replace(".", "").strip()
+        if len(name_content.replace(" ", "")) <= 4:  # Skip if 4 letters or less
+            continue
+        
+        # Check that each word has minimum length
+        words = name_content.split()
+        if any(len(word) < 2 for word in words):  # Skip if any word is less than 2 characters
+            continue
         
         # Check if it looks like a name
         if (5 <= len(clean) <= 50 and 
@@ -442,6 +495,7 @@ def package_name_info(structured_data: Dict[str, str], basic_text: str, fingerpr
 # ============== CAMERA FUNCTIONS ==============
 
 def auto_capture_license_rpi(reference_name: str = "", fingerprint_info: Optional[dict] = None, retry_mode: bool = False) -> Optional[str]:
+    """Auto-capture license using RPi Camera with ROI-only enhancement and stability tracking"""
     camera = get_camera()
     if not camera.initialized:
         return None
@@ -456,17 +510,71 @@ def auto_capture_license_rpi(reference_name: str = "", fingerprint_info: Optiona
     
     SCREEN_WIDTH, SCREEN_HEIGHT = 720, 600
     BOX_WIDTH, BOX_HEIGHT = 600, 350
-    KEYWORDS_NEEDED = 3
     CAPTURE_DELAY = 1.0
     KEYWORD_CHECK_INTERVAL = 5
+    
+    # Stability settings for longer green time
+    STABILITY_FRAMES = 1  # Need 1 good reading to go green (reduced from 5 for faster response)
+    MIN_GREEN_TIME = 2.0  # Stay green for at least 2 seconds
+    KEYWORD_HISTORY_SIZE = 8  # Track last 8 readings
     
     frame_count = 0
     captured_frame = None
     ready_time = None
     current_keywords = 0
+    keyword_history = []
+    good_readings_count = 0
+    green_start_time = None
     
     cv2.namedWindow("MotorPass - License Capture", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("MotorPass - License Capture", SCREEN_WIDTH, SCREEN_HEIGHT)
+    
+    def _enhance_roi_only(roi, keyword_count):
+        """Enhance only the ROI based on keyword detection"""
+        if keyword_count == 0:
+            # Strong enhancement for poor detection
+            alpha, beta = 2.0, 50
+        elif keyword_count == 1:
+            # Medium enhancement
+            alpha, beta = 1.6, 35
+        elif keyword_count == 2:
+            # Light enhancement
+            alpha, beta = 1.3, 25
+        else:
+            # Normal processing
+            alpha, beta = 1.1, 15
+        
+        enhanced_roi = cv2.convertScaleAbs(roi, alpha=alpha, beta=beta)
+        
+        # Additional processing for very poor detection
+        if keyword_count < 2:
+            gray = cv2.cvtColor(enhanced_roi, cv2.COLOR_BGR2GRAY)
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            enhanced_gray = clahe.apply(gray)
+            enhanced_roi = cv2.cvtColor(enhanced_gray, cv2.COLOR_GRAY2BGR)
+        
+        return enhanced_roi, alpha
+    
+    def _get_adaptive_threshold(keyword_count, keyword_history, is_currently_green):
+        """Stable adaptive threshold with hysteresis"""
+        if not keyword_history:
+            return 3 if keyword_count == 0 else 2
+        
+        # Calculate average and stability
+        avg_keywords = sum(keyword_history) / len(keyword_history)
+        recent_stable = len([k for k in keyword_history[-3:] if k >= 2]) >= 2
+        
+        if is_currently_green:
+            # Hysteresis: Once green, easier to stay green
+            return 1 if recent_stable else 2
+        else:
+            # Need more evidence to go green
+            if avg_keywords >= 2.5 and recent_stable:
+                return 2
+            elif avg_keywords >= 1.5:
+                return 2
+            else:
+                return 3
     
     try:
         while True:
@@ -478,6 +586,7 @@ def auto_capture_license_rpi(reference_name: str = "", fingerprint_info: Optiona
             scale = min(SCREEN_WIDTH / original_w, SCREEN_HEIGHT / original_h)
             new_w, new_h = int(original_w * scale), int(original_h * scale)
             
+            # Keep display frame normal - no global brightness changes
             brightened = cv2.convertScaleAbs(frame, alpha=1.2, beta=20)
             mirrored = cv2.flip(brightened, 1)
             display_frame = cv2.resize(mirrored, (new_w, new_h))
@@ -489,63 +598,154 @@ def auto_capture_license_rpi(reference_name: str = "", fingerprint_info: Optiona
             box_y2 = min(new_h, center_y + BOX_HEIGHT // 2)
             
             frame_count += 1
+            roi_enhancement_level = 1.0  # Track current ROI enhancement
             
-            # Check for license keywords periodically
+            # Check for license keywords with stability tracking
             if frame_count % KEYWORD_CHECK_INTERVAL == 0:
                 try:
                     orig_box_x1, orig_box_y1 = int(box_x1 / scale), int(box_y1 / scale)
                     orig_box_x2, orig_box_y2 = int(box_x2 / scale), int(box_y2 / scale)
+                    
+                    # Extract ROI from original brightened frame
                     roi = brightened[orig_box_y1:orig_box_y2, orig_box_x1:orig_box_x2]
                     
                     if roi.size > 0:
-                        gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                        # Enhance only the ROI based on previous detection
+                        enhanced_roi, roi_enhancement_level = _enhance_roi_only(roi, current_keywords)
+                        
+                        # Perform OCR on enhanced ROI
+                        gray_roi = cv2.cvtColor(enhanced_roi, cv2.COLOR_BGR2GRAY)
                         thresh_roi = cv2.threshold(gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
                         quick_text = pytesseract.image_to_string(thresh_roi, config=OCR_CONFIG_FAST).upper()
+                        
                         current_keywords = sum(1 for keyword in VERIFICATION_KEYWORDS if keyword in quick_text)
                         
-                        if current_keywords >= KEYWORDS_NEEDED:
-                            if ready_time is None:
+                        # Update keyword history for stability
+                        keyword_history.append(current_keywords)
+                        if len(keyword_history) > KEYWORD_HISTORY_SIZE:
+                            keyword_history.pop(0)
+                        
+                        # Check if currently in green state
+                        is_currently_green = ready_time is not None
+                        keywords_needed = _get_adaptive_threshold(current_keywords, keyword_history, is_currently_green)
+                        
+                        # Stability logic for going green
+                        if current_keywords >= keywords_needed:
+                            good_readings_count += 1
+                            
+                            # First time going green - need stable readings
+                            if not is_currently_green and good_readings_count >= STABILITY_FRAMES:
                                 ready_time = time.time()
+                                green_start_time = time.time()
+                                good_readings_count = 0  # Reset counter
+                            # Already green - stay green with hysteresis
+                            elif is_currently_green:
+                                pass  # Keep ready_time as is
                         else:
-                            ready_time = None
+                            good_readings_count = 0
+                            
+                            # Only lose green state if enough time has passed
+                            if is_currently_green and green_start_time:
+                                time_green = time.time() - green_start_time
+                                if time_green >= MIN_GREEN_TIME:
+                                    ready_time = None
+                                    green_start_time = None
+                            elif not is_currently_green:
+                                ready_time = None
+                                green_start_time = None
                     else:
                         current_keywords = 0
+                        good_readings_count = 0
                         ready_time = None
+                        green_start_time = None
+                        roi_enhancement_level = 1.0
                         
                 except Exception:
                     current_keywords = 0
+                    good_readings_count = 0
                     ready_time = None
+                    green_start_time = None
+                    roi_enhancement_level = 1.0
             
-            ready_to_capture = current_keywords >= KEYWORDS_NEEDED and ready_time is not None
+            is_currently_green = ready_time is not None
+            keywords_needed = _get_adaptive_threshold(current_keywords, keyword_history, is_currently_green)
+            ready_to_capture = ready_time is not None
             
-            # Auto capture after delay
+            # Show stability progress
+            stability_progress = min(100, (good_readings_count / STABILITY_FRAMES) * 100)
+            green_time = (time.time() - green_start_time) if green_start_time else 0
+            
+            # Auto capture after delay - enhance the captured frame based on final ROI enhancement
             if ready_to_capture and (time.time() - ready_time) >= CAPTURE_DELAY:
-                captured_frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=20)
+                # Apply the same enhancement level to the full frame for capture
+                if roi_enhancement_level > 1.2:
+                    captured_frame = cv2.convertScaleAbs(frame, alpha=roi_enhancement_level, beta=30)
+                else:
+                    captured_frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=20)
                 break
             
-            # Determine colors and status
+            # Determine colors and status with stability info
+            enhancement_info = f" (ROI: {roi_enhancement_level:.1f}x)" if roi_enhancement_level > 1.0 else ""
+            
             if ready_to_capture:
                 box_color = (0, 255, 0)
                 remaining_delay = CAPTURE_DELAY - (time.time() - ready_time) if ready_time else CAPTURE_DELAY
-                status_text = f"READY! Capturing in {remaining_delay:.1f}s... ({current_keywords} keywords)"
+                green_duration = f" [Green: {green_time:.1f}s]" if green_time > 0 else ""
+                status_text = f"READY! Capturing in {remaining_delay:.1f}s... ({current_keywords}/{keywords_needed}){enhancement_info}{green_duration}"
                 status_color = (0, 255, 0)
-            elif current_keywords >= 2:
+            elif good_readings_count > 0:
                 box_color = (0, 255, 255)
-                status_text = f"Almost ready... Found {current_keywords}/{KEYWORDS_NEEDED} keywords"
+                progress_text = f" [Stabilizing: {good_readings_count}/{STABILITY_FRAMES}]"
+                status_text = f"Stabilizing... Found {current_keywords}/{keywords_needed} keywords{enhancement_info}{progress_text}"
+                status_color = (0, 255, 255)
+            elif current_keywords >= max(1, keywords_needed - 1):
+                box_color = (0, 255, 255)
+                avg_text = f" [Avg: {sum(keyword_history)/len(keyword_history):.1f}]" if keyword_history else ""
+                status_text = f"Almost ready... Found {current_keywords}/{keywords_needed} keywords{enhancement_info}{avg_text}"
                 status_color = (0, 255, 255)
             elif current_keywords >= 1:
                 box_color = (0, 165, 255)
-                status_text = f"License detected! Found {current_keywords}/{KEYWORDS_NEEDED} keywords"
+                status_text = f"License detected! Found {current_keywords}/{keywords_needed} keywords{enhancement_info}"
                 status_color = (0, 165, 255)
             else:
                 box_color = (0, 0, 255)
-                status_text = f"Position license in box... ({current_keywords} keywords found)"
+                status_text = f"Position license in box... ({current_keywords} keywords){enhancement_info}"
                 status_color = (255, 255, 255)
             
-            # Draw UI elements
-            cv2.rectangle(display_frame, (box_x1, box_y1), (box_x2, box_y2), box_color, 3)
+            # Draw UI elements with ROI enhancement visualization
+            # Make box color intensity reflect ROI enhancement level
+            if roi_enhancement_level > 1.5:
+                box_thickness = 4  # Thicker box for high enhancement
+            else:
+                box_thickness = 3
+                
+            cv2.rectangle(display_frame, (box_x1, box_y1), (box_x2, box_y2), box_color, box_thickness)
             
-            camera_status = "RETAKE MODE" if retry_mode else "License Capture"
+            # Optional: Show enhanced ROI preview in corner when enhancement is active
+            if roi_enhancement_level > 1.2 and frame_count % KEYWORD_CHECK_INTERVAL == 0:
+                try:
+                    orig_box_x1, orig_box_y1 = int(box_x1 / scale), int(box_y1 / scale)
+                    orig_box_x2, orig_box_y2 = int(box_x2 / scale), int(box_y2 / scale)
+                    roi_preview = brightened[orig_box_y1:orig_box_y2, orig_box_x1:orig_box_x2]
+                    enhanced_preview, _ = _enhance_roi_only(roi_preview, current_keywords)
+                    
+                    # Resize preview and place in corner
+                    preview_h, preview_w = enhanced_preview.shape[:2]
+                    preview_scale = min(150 / preview_w, 100 / preview_h)
+                    preview_resized = cv2.resize(enhanced_preview, (int(preview_w * preview_scale), int(preview_h * preview_scale)))
+                    
+                    # Place in top-right corner
+                    y1, y2 = 10, 10 + preview_resized.shape[0]
+                    x1, x2 = new_w - preview_resized.shape[1] - 10, new_w - 10
+                    
+                    if y2 < new_h and x1 > 0:
+                        display_frame[y1:y2, x1:x2] = preview_resized
+                        cv2.rectangle(display_frame, (x1-1, y1-1), (x2+1, y2+1), (0, 255, 255), 1)
+                        cv2.putText(display_frame, "Enhanced", (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 255, 255), 1)
+                except:
+                    pass
+            
+            camera_status = "RETAKE MODE" if retry_mode else "License Capture [ROI Focus]"
             cv2.putText(display_frame, camera_status, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255) if retry_mode else (0, 255, 0), 2)
             
             if reference_name:
@@ -554,12 +754,36 @@ def auto_capture_license_rpi(reference_name: str = "", fingerprint_info: Optiona
             cv2.putText(display_frame, status_text, (10, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color, 1)
             cv2.putText(display_frame, "Auto-capture | 's' = manual | 'q' = quit", (10, new_h-10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
             
-            # Progress bar
-            if current_keywords > 0:
-                progress_width = int((current_keywords / KEYWORDS_NEEDED) * 200)
+            # Progress bar with stability and ROI enhancement indicator
+            if current_keywords >= 0:
+                # Show stability progress if working towards green
+                if good_readings_count > 0 and not ready_to_capture:
+                    progress_width = int((good_readings_count / STABILITY_FRAMES) * 200)
+                    progress_color = (0, 255, 255)  # Cyan for stability progress
+                    progress_text = f"Stabilizing: {good_readings_count}/{STABILITY_FRAMES} | ROI: {roi_enhancement_level:.1f}x"
+                else:
+                    # Normal keyword progress
+                    progress_width = int((current_keywords / max(keywords_needed, 1)) * 200)
+                    
+                    # Color based on enhancement level and state
+                    if ready_to_capture:
+                        progress_color = (0, 255, 0)  # Green when ready
+                    elif roi_enhancement_level >= 1.8:
+                        progress_color = (0, 100, 255)  # Orange for high enhancement
+                    elif roi_enhancement_level >= 1.4:
+                        progress_color = (0, 200, 255)  # Yellow for medium enhancement
+                    else:
+                        progress_color = box_color
+                    
+                    if ready_to_capture:
+                        progress_text = f"READY! Keywords: {current_keywords}/{keywords_needed} | Green Time: {green_time:.1f}s"
+                    else:
+                        avg_text = f" | Avg: {sum(keyword_history)/len(keyword_history):.1f}" if keyword_history else ""
+                        progress_text = f"Keywords: {current_keywords}/{keywords_needed} | ROI: {roi_enhancement_level:.1f}x{avg_text}"
+                    
                 cv2.rectangle(display_frame, (10, new_h-40), (210, new_h-25), (50, 50, 50), -1)
-                cv2.rectangle(display_frame, (10, new_h-40), (10 + progress_width, new_h-25), box_color, -1)
-                cv2.putText(display_frame, f"Keywords: {current_keywords}/{KEYWORDS_NEEDED}", (10, new_h-45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+                cv2.rectangle(display_frame, (10, new_h-40), (10 + progress_width, new_h-25), progress_color, -1)
+                cv2.putText(display_frame, progress_text, (10, new_h-45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
             
             # Countdown
             if ready_to_capture and ready_time:
@@ -577,7 +801,11 @@ def auto_capture_license_rpi(reference_name: str = "", fingerprint_info: Optiona
             if key == ord("q"):
                 break
             elif key == ord("s"):
-                captured_frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=20)
+                # Manual capture with current enhancement level
+                if roi_enhancement_level > 1.2:
+                    captured_frame = cv2.convertScaleAbs(frame, alpha=roi_enhancement_level, beta=30)
+                else:
+                    captured_frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=20)
                 break
         
         cv2.destroyAllWindows()
@@ -735,8 +963,17 @@ def complete_verification_flow(image_path: str, fingerprint_info: dict,
     final_document_status = license_result.document_verified
     
     fingerprint_verified = fingerprint_info['confidence'] > 50
-    license_detected = "Driver's License Detected" in final_document_status
+    
+    # Check if license is detected (including name match override)
+    license_detected = ("Driver's License Detected" in final_document_status or 
+                       "Name Match Override" in final_document_status)
+    
     name_matching_verified = final_match_score > 0.65
+    
+    # If names match, force license detection to be true
+    if name_matching_verified:
+        license_detected = True
+        print(f"🎯 Name match override: License detection forced to TRUE")
     
     all_verified = (helmet_verified and fingerprint_verified and 
                    license_expiration_valid and license_detected and 
@@ -748,7 +985,8 @@ def complete_verification_flow(image_path: str, fingerprint_info: dict,
     print(f"🪖 Helmet: {'✅' if helmet_verified else '❌'}")
     print(f"🔒 Fingerprint: {'✅' if fingerprint_verified else '❌'} ({fingerprint_info['confidence']}%)")
     print(f"📅 License Valid: {'✅' if license_expiration_valid else '❌'}")
-    print(f"🆔 License Detected: {'✅' if license_detected else '❌'}")
+    print(f"🆔 License Detected: {'✅' if license_detected else '❌'}" + 
+          (" (Name Match Override)" if name_matching_verified and license_detected else ""))
     print(f"👤 Name Match: {'✅' if name_matching_verified else '❌'} ({final_match_score*100:.1f}%)")
     print(f"🟢 STATUS: {'✅ FULLY VERIFIED' if all_verified else '❌ VERIFICATION FAILED'}")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
