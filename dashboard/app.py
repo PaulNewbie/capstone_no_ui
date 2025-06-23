@@ -23,7 +23,7 @@ CORS(app)
 
 # Simple authentication
 ADMIN_USERNAME = 'admin'
-ADMIN_PASSWORD_HASH = hashlib.sha256('motorpass123'.encode()).hexdigest()  # Change default password
+ADMIN_PASSWORD_HASH = hashlib.sha256('motorpass123'.encode()).hexdigest()  
 
 def login_required(f):
     @wraps(f)

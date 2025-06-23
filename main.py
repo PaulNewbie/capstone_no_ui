@@ -15,6 +15,7 @@ os.environ['OPENCV_VIDEOIO_PRIORITY_V4L2'] = '0'
 # Import configuration
 from config import SYSTEM_NAME, SYSTEM_VERSION
 
+
 # Import services
 from services.led_control import (
     init_led_system, 

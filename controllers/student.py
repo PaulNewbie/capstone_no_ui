@@ -66,7 +66,7 @@ def console_student_verification():
     if not verify_helmet():
         print("❌ Helmet verification failed")
         set_led_idle()
-        play_failure()
+        #play_failure()
         input("\n📱 Press Enter to return to main menu...")
         return
     
@@ -79,7 +79,7 @@ def console_student_verification():
     if not student_info:
         print("❌ Authentication failed")
         set_led_idle()
-        play_failure()
+        #play_failure()
         input("\n📱 Press Enter to return to main menu...")
         return
     
@@ -111,7 +111,7 @@ def run_verification_steps(status_callback=None):
                 status_callback("helmet", "FAILED")
                 status_callback("message", "❌ Helmet verification failed\n🪖 Please wear a full-face helmet (not nutshell type)")
             set_led_idle()
-            play_failure()
+            #play_failure()
             return None
         
         if status_callback:
@@ -361,7 +361,7 @@ def process_time_out_gui(student_info, status_callback=None):
             if status_callback:
                 status_callback("message", "❌ Database Error\n💾 Failed to record TIME OUT")
             set_led_idle()
-            play_failure()
+            #play_failure()
             return None
             
     except Exception as e:
@@ -422,7 +422,7 @@ def _process_student_time_in(student_info):
     if not license_valid and "expired" in warning_msg.lower():
         print("❌ License expired - Cannot proceed")
         set_led_idle()
-        play_failure()
+        #play_failure()
         return
     
     image_path = auto_capture_license_rpi(
@@ -433,7 +433,7 @@ def _process_student_time_in(student_info):
     if not image_path:
         print("❌ License capture failed")
         set_led_idle()
-        play_failure()
+        #play_failure()
         return
     
     is_fully_verified = complete_verification_flow(
