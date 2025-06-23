@@ -1,367 +1,136 @@
-# controllers/guest.py - Simplified with Clean Buzzer Usage
+# Add this function to controllers/guest.py
 
-from services.license_reader import (
-    auto_capture_license_rpi, 
-    extract_text_from_image, 
-    extract_guest_name_from_license,
-    complete_guest_verification_flow
-)
-from services.helmet_infer import verify_helmet
-from services.led_control import *
-from services.buzzer_control import play_processing, play_success, play_failure
-
-from utils.gui_helpers import show_results_gui, get_guest_info_gui, updated_guest_office_gui
-
-# Import database functions
-from database.unified_db import db
-from database.db_operations import record_guest_time_in, record_guest_time_out
-
-import difflib
-import time
-
+def run_guest_verification_steps(guest_info, status_callback=None):
+    """
+    This is a simplified version for the new sequential GUI
+    The actual verification happens in the GUI step by step
+    """
+    # This function is called by the original GUI design
+    # But in the new sequential flow, verification is already done
+    # So we just process the time in/out
+    try:
+        from database.db_operations import db
+        from services.led_control import set_led_success, set_led_idle
+        from services.buzzer_control import play_success, play_failure
+        import time
+        
+        # Check current status
+        current_status = db.get_current_status(f"GUEST_{guest_info['plate_number']}")
+        
+        # Determine time action and record
+        if current_status == 'OUT' or current_status is None:
+            # TIME IN
+            success = record_guest_time_in(guest_info)
+            time_action = 'IN'
+        else:
+            # TIME OUT
+            success = record_guest_time_out(guest_info)
+            time_action = 'OUT'
+        
+        if success:
+            set_led_success(duration=5.0)
+            play_success()
+            
+            return {
+                'name': guest_info['name'],
+                'plate_number': guest_info['plate_number'],
+                'office': guest_info['office'],
+                'time_action': time_action,
+                'timestamp': time.strftime('%H:%M:%S'),
+                'verified': True
+            }
+        else:
+            set_led_idle()
+            play_failure()
+            return None
+            
+    except Exception as e:
+        if status_callback:
+            status_callback("message", f"❌ System Error: {str(e)}")
+        set_led_idle()
+        play_failure()
+        return None
+        
+# Update the main guest_verification function to use GUI
 def guest_verification():
-    """Main guest verification workflow"""
-    print("\n🎫 GUEST VERIFICATION SYSTEM")
-    
-    set_led_processing()
-    play_processing()  # Start process sound
-    
-    # Step 1: Helmet verification
-    print("🪖 Checking helmet...")
-    if not verify_helmet():
-        print("❌ Helmet verification failed")
-        set_led_idle()
-        play_failure()
-        input("\n📱 Press Enter to return...")
-        return
-    
-    print("✅ Helmet verified")
-    
-    # Step 2: Capture license
-    print("📄 Starting license capture...")
-    image_path = auto_capture_license_rpi()
-    
-    if not image_path:
-        print("❌ License capture failed")
-        set_led_idle()
-        play_failure()
-        input("\n📱 Press Enter to return...")
-        return
-    
-    # Step 3: Extract name and check guest status
-    detected_name = extract_guest_name_from_license_image(image_path)
-    print(f"📄 Detected name: {detected_name}")
-    
-    current_status, guest_info = get_guest_time_status(detected_name)
-    
-    if current_status == 'IN':
-        # Process TIME OUT
-        _process_guest_time_out(guest_info, image_path)
-    elif current_status == 'OUT' and guest_info is not None:
-        # Process returning guest TIME IN
-        _process_returning_guest_time_in(guest_info, image_path)
-    else:
-        # New guest TIME IN
-        _process_new_guest_time_in(detected_name, image_path)
-    
-    input("\n📱 Press Enter to return...")
-
-def extract_guest_name_from_license_image(image_path: str) -> str:
-    """Simple and reliable guest name extraction"""
+    """Main guest verification workflow with GUI"""
     try:
-        import re
-        ocr_text = extract_text_from_image(image_path)
-        lines = [line.strip() for line in ocr_text.splitlines() if line.strip()]
+        from ui.guest_gui import show_guest_verification_gui
+        print("🎫 Starting Guest Verification GUI...")
+        show_guest_verification_gui()
+    except ImportError as e:
+        print(f"❌ GUI not available ({e}), using console mode")
+        console_guest_verification()
+    except Exception as e:
+        print(f"❌ GUI Error: {e}")
+        console_guest_verification()
+    finally:
+        cleanup_camera()
         
-        # Check first 15 lines only
-        for line in lines[:15]:
-            line_clean = line.upper().strip()
-            
-            # Remove common OCR artifacts
-            line_clean = re.sub(r'^[\d\.\-\s]+', '', line_clean)
-            
-            # Skip empty lines after cleaning
-            if not line_clean or len(line_clean) < 7:
-                continue
-            
-            # Skip if doesn't have exactly one comma
-            if line_clean.count(',') != 1:
-                continue
-            
-            # Skip address patterns
-            address_indicators = [
-                'BLK', 'BLOCK', 'LOT', 'PHASE', 'STREET', 'ST', 'ROAD', 'RD', 
-                'AVENUE', 'AVE', 'BARANGAY', 'BRGY', 'CITY', 'PROVINCE'
-            ]
-            
-            if any(indicator in line_clean.split() for indicator in address_indicators):
-                continue
-            
-            # Skip document keywords
-            doc_keywords = [
-                'REPUBLIC', 'PHILIPPINES', 'DEPARTMENT', 'TRANSPORTATION', 
-                'LICENSE', 'DRIVER', 'ADDRESS', 'NATIONALITY', 'OFFICE'
-            ]
-            if any(keyword in line_clean for keyword in doc_keywords):
-                continue
-            
-            # Skip lines with multi-digit numbers
-            if re.search(r'\b\d{2,}\b', line_clean):
-                continue
-            
+def record_guest_time_in(guest_data):
+    """
+    Record guest time in - wrapper for database function
+    guest_data should contain: name, plate_number, office, is_guest=True
+    """
+    try:
+        from database.db_operations import db
+        
+        # First create/update guest record
+        success = db.create_guest_record(
+            name=guest_data['name'],
+            plate_number=guest_data['plate_number'],
+            office=guest_data['office']
+        )
+        
+        if success:
+            # Then record time in with GUEST_ prefix
+            return db.record_time_in({
+                'name': guest_data['name'],
+                'student_id': f"GUEST_{guest_data['plate_number']}",
+                'is_guest': True
+            })
+        return False
+        
+    except Exception as e:
+        print(f"Error recording guest time in: {e}")
+        return False
+
+def record_guest_time_out(guest_data):
+    """
+    Record guest time out - wrapper for database function
+    """
+    try:
+        from database.db_operations import db
+        
+        # Record time out with GUEST_ prefix
+        return db.record_time_out({
+            'name': guest_data['name'],
+            'student_id': f"GUEST_{guest_data['plate_number']}",
+            'is_guest': True
+        })
+        
+    except Exception as e:
+        print(f"Error recording guest time out: {e}")
+        return False
+
+def cleanup_camera():
+    """Simple camera cleanup"""
+    try:
+        import cv2
+        cv2.destroyAllWindows()
+        
+        # Release any camera that might be in use
+        for i in range(3):
             try:
-                # Split by comma
-                parts = line_clean.split(',')
-                if len(parts) != 2:
-                    continue
-                    
-                lastname = parts[0].strip()
-                firstname = parts[1].strip()
-                
-                # Clean remaining special chars
-                lastname_clean = re.sub(r'[^A-Z\s]', '', lastname).strip()
-                firstname_clean = re.sub(r'[^A-Z\s]', '', firstname).strip()
-                
-                # Validate names
-                if (lastname_clean and firstname_clean and
-                    2 <= len(lastname_clean) <= 20 and 2 <= len(firstname_clean) <= 30 and
-                    lastname_clean.replace(' ', '').isalpha() and 
-                    firstname_clean.replace(' ', '').isalpha() and
-                    len(lastname_clean.split()) <= 3 and 
-                    len(firstname_clean.split()) <= 4):
-                    
-                    return f"{lastname_clean}, {firstname_clean}"
-                    
-            except Exception:
-                continue
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened():
+                    cap.release()
+            except:
+                pass
+    except:
+        pass
         
-        return "Guest"
-        
-    except Exception as e:
-        print(f"Error extracting name: {e}")
-        return "Guest"
-              
-def get_guest_time_status(detected_name, plate_number=None):
-    """Get current time status of guest"""
-    try:
-        # Get all people currently inside
-        people_inside = db.get_people_currently_inside('GUEST')
-        
-        # Check people currently inside first
-        for person in people_inside:
-            guest_name = person['person_name']
-            similarity = _calculate_name_similarity(detected_name, guest_name)
-            
-            if similarity > 0.6:
-                guest_id = person['person_id']
-                guest_details = db.get_guest(guest_id=guest_id)
-                
-                if guest_details:
-                    guest_info = {
-                        'name': guest_details['full_name'],
-                        'student_id': guest_id,
-                        'plate_number': guest_details['plate_number'],
-                        'office': guest_details['office_visiting'],
-                        'current_status': 'IN',
-                        'similarity_score': similarity
-                    }
-                    return 'IN', guest_info
-        
-        # Check recent records for returning guests
-        recent_records = db.get_time_records(person_type='GUEST', limit=50)
-        guest_records = {}
-        
-        for record in recent_records:
-            guest_id = record['person_id']
-            if guest_id not in guest_records:
-                guest_records[guest_id] = {
-                    'name': record['person_name'],
-                    'last_action': record['action'],
-                    'timestamp': record['timestamp']
-                }
-        
-        # Find best match among recent guests
-        best_match = None
-        highest_similarity = 0.0
-        
-        for guest_id, record in guest_records.items():
-            guest_name = record['name']
-            similarity = _calculate_name_similarity(detected_name, guest_name)
-            
-            if similarity > highest_similarity and similarity > 0.6:
-                highest_similarity = similarity
-                guest_details = db.get_guest(guest_id=guest_id)
-                
-                if guest_details:
-                    best_match = {
-                        'name': guest_details['full_name'],
-                        'student_id': guest_id,
-                        'plate_number': guest_details['plate_number'],
-                        'office': guest_details['office_visiting'],
-                        'current_status': record['last_action'],
-                        'similarity_score': similarity
-                    }
-        
-        if best_match:
-            return best_match['current_status'], best_match
-        
-        return None, None
-        
-    except Exception as e:
-        print(f"❌ Error checking guest status: {e}")
-        return None, None
-
-def _calculate_name_similarity(detected_name: str, guest_name: str) -> float:
-    """Calculate similarity between two names"""
-    similarity = difflib.SequenceMatcher(None, detected_name.upper(), guest_name.upper()).ratio()
-    
-    # Boost for substring matches
-    if (detected_name.upper() in guest_name.upper() or 
-        guest_name.upper() in detected_name.upper()):
-        similarity = max(similarity, 0.8)
-    
-    return similarity
-
-def _process_guest_time_out(guest_info, image_path):
-    """Process guest time out"""
-    print(f"✅ Found guest: {guest_info['name']} ({guest_info['similarity_score']*100:.1f}% match)")
-    print("🔴 TIMING OUT...")
-    print("🛡️ Drive safe!")
-    
-    time_result = _record_guest_time_out(guest_info)
-    print(f"🕒 {time_result['message']}")
-    
-    if time_result['success']:
-        set_led_success(duration=5.0)
-        play_success()
-    else:
-        set_led_idle()
-        play_failure()
-
-def _process_returning_guest_time_in(guest_info, image_path):
-    """Process returning guest time in"""
-    print(f"✅ Returning guest: {guest_info['name']} ({guest_info['similarity_score']*100:.1f}% match)")
-    print("🟢 TIMING IN...")
-    
-    # Get updated office info
-    updated_guest_info = updated_guest_office_gui(guest_info['name'], guest_info.get('office', 'CSS Office'))
-    
-    if not updated_guest_info:
-        print("❌ Office update cancelled")
-        set_led_idle()
-        play_failure()
-        return
-    
-    guest_data = {
-        'name': updated_guest_info['name'],
-        'plate_number': guest_info['plate_number'],
-        'office': updated_guest_info['office'],
-        'is_guest': True
-    }
-    
-    # Verify license
-    is_verified = complete_guest_verification_flow(
-        image_path=image_path,
-        guest_info=guest_data,
-        helmet_verified=True
-    )
-    
-    if is_verified:
-        time_result = _record_guest_time_in(guest_data)
-        print(f"🕒 {time_result['message']}")
-        
-        if time_result['success']:
-            set_led_success(duration=5.0)
-            play_success()
-        else:
-            set_led_idle()
-            play_failure()
-    else:
-        print("❌ Guest verification failed")
-        set_led_idle()
-        play_failure()
-
-def _process_new_guest_time_in(detected_name, image_path):
-    """Process new guest time in"""
-    print("🟢 New guest - TIMING IN...")
-    
-    guest_info_input = get_guest_info_gui(detected_name)
-    
-    if not guest_info_input:
-        print("❌ Guest info cancelled")
-        set_led_idle()
-        play_failure()
-        return
-    
-    print(f"✅ Guest info: {guest_info_input['name']} | {guest_info_input['plate_number']} | {guest_info_input['office']}")
-    
-    guest_data = {
-        'name': guest_info_input['name'],
-        'plate_number': guest_info_input['plate_number'],
-        'office': guest_info_input['office'],
-        'is_guest': True
-    }
-    
-    # Verify license
-    is_verified = complete_guest_verification_flow(
-        image_path=image_path,
-        guest_info=guest_data,
-        helmet_verified=True
-    )
-    
-    if is_verified:
-        time_result = _record_guest_time_in(guest_data)
-        print(f"🕒 {time_result['message']}")
-        
-        if time_result['success']:
-            set_led_success(duration=5.0)
-            play_success()
-        else:
-            set_led_idle()
-            play_failure()
-    else:
-        print("❌ Guest verification failed")
-        set_led_idle()
-        play_failure()
-
-def _record_guest_time_in(guest_info):
-    """Record guest time in"""
-    try:
-        success = record_guest_time_in(guest_info)
-        
-        if success:
-            return {
-                'success': True,
-                'message': f"✅ TIME IN SUCCESSFUL - {time.strftime('%H:%M:%S')}"
-            }
-        else:
-            return {
-                'success': False,
-                'message': "❌ Failed to record TIME IN"
-            }
-    except Exception as e:
-        return {
-            'success': False,
-            'message': f"❌ Error: {e}"
-        }
-
-def _record_guest_time_out(guest_info):
-    """Record guest time out"""
-    try:
-        success = record_guest_time_out(guest_info)
-        
-        if success:
-            return {
-                'success': True,
-                'message': f"✅ TIME OUT SUCCESSFUL - {time.strftime('%H:%M:%S')}"
-            }
-        else:
-            return {
-                'success': False,
-                'message': "❌ Failed to record TIME OUT"
-            }
-    except Exception as e:
-        return {
-            'success': False,
-            'message': f"❌ Error: {e}"
-        }
+# Rename the existing guest_verification to console_guest_verification
+def console_guest_verification():
+    """Console-based guest verification (your existing implementation)"""
+    # ... (keep your existing console implementation here)

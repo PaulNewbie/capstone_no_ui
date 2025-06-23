@@ -9,6 +9,9 @@ from controllers.admin import admin_panel
 from controllers.student import student_verification
 from controllers.guest import guest_verification
 
+os.environ['OPENCV_LOG_LEVEL'] = 'OFF'
+os.environ['OPENCV_VIDEOIO_PRIORITY_V4L2'] = '0'
+
 # Import configuration
 from config import SYSTEM_NAME, SYSTEM_VERSION
 

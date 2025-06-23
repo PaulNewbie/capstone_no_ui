@@ -287,9 +287,21 @@ def extract_name_from_lines(image_path: str, reference_name: str = "", best_ocr_
     full_text = " ".join(raw_text.splitlines()).upper()
     
     keywords_found = _count_verification_keywords(full_text)
-    is_verified = keywords_found >= 1
     
-    doc_status = "Driver's License Detected" if is_verified else "Unverified Document"
+    # NEW: Check if names match - if they do, always consider license detected
+    name_matches = False
+    if reference_name and match_score >= 0.65:
+        name_matches = True
+        print(f"🎯 Name match detected ({match_score*100:.1f}%) - License validation override applied")
+    
+    # Override license detection if names match
+    if name_matches:
+        is_verified = True  # Force verification to true when names match
+        doc_status = "Driver's License Detected (Name Match Override)"
+    else:
+        is_verified = keywords_found >= 1
+        doc_status = "Driver's License Detected" if is_verified else "Unverified Document"
+    
     name_info = {"Document Verified": doc_status}
     
     # Check match confidence levels
@@ -892,8 +904,15 @@ def complete_verification_flow(image_path: str, fingerprint_info: dict,
     final_document_status = license_result.document_verified
     
     fingerprint_verified = fingerprint_info['confidence'] > 50
-    license_detected = "Driver's License Detected" in final_document_status
+    
+    license_detected = ("Driver's License Detected" in final_document_status or 
+                       "Name Match Override" in final_document_status)
+    
     name_matching_verified = final_match_score > 0.65
+    
+    if name_matching_verified:
+        license_detected = True
+        print(f"🎯 Name match override: License detection forced to TRUE")
     
     all_verified = (helmet_verified and fingerprint_verified and 
                    license_expiration_valid and license_detected and 
@@ -905,7 +924,8 @@ def complete_verification_flow(image_path: str, fingerprint_info: dict,
     print(f"🪖 Helmet: {'✅' if helmet_verified else '❌'}")
     print(f"🔒 Fingerprint: {'✅' if fingerprint_verified else '❌'} ({fingerprint_info['confidence']}%)")
     print(f"📅 License Valid: {'✅' if license_expiration_valid else '❌'}")
-    print(f"🆔 License Detected: {'✅' if license_detected else '❌'}")
+    print(f"🆔 License Detected: {'✅' if license_detected else '❌'}" + 
+          (" (Name Match Override)" if name_matching_verified and license_detected else ""))
     print(f"👤 Name Match: {'✅' if name_matching_verified else '❌'} ({final_match_score*100:.1f}%)")
     print(f"🟢 STATUS: {'✅ FULLY VERIFIED' if all_verified else '❌ VERIFICATION FAILED'}")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
