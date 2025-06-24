@@ -1,9 +1,10 @@
-# services/led_control.py - Clean LED control with no GPIO warnings
+# services/led_control.py - Clean LED control with simple config check
 
 import RPi.GPIO as GPIO
 import time
 import threading
 from enum import Enum
+from config import ENABLE_LED
 
 # Disable GPIO warnings
 GPIO.setwarnings(False)
@@ -25,6 +26,9 @@ class LEDController:
         self.blink_thread = None
         self.stop_blink = threading.Event()
         
+        if not ENABLE_LED:
+            return
+        
         # Clean up any existing GPIO setup first
         try:
             GPIO.cleanup([self.red_pin, self.green_pin])
@@ -42,6 +46,8 @@ class LEDController:
     
     def _blink_red(self):
         """Internal method to handle red LED blinking"""
+        if not ENABLE_LED:
+            return
         while not self.stop_blink.is_set():
             if self.current_state == LEDState.IDLE:
                 GPIO.output(self.red_pin, GPIO.HIGH)
@@ -61,6 +67,9 @@ class LEDController:
             state (LEDState): Target LED state
             duration (float, optional): Auto-return to idle after duration (seconds)
         """
+        if not ENABLE_LED:
+            return
+            
         # Stop any ongoing blinking
         self.stop_blink.set()
         if self.blink_thread and self.blink_thread.is_alive():
@@ -101,6 +110,8 @@ class LEDController:
     
     def cleanup(self):
         """Clean up GPIO resources"""
+        if not ENABLE_LED:
+            return
         self.stop_blink.set()
         if self.blink_thread and self.blink_thread.is_alive():
             self.blink_thread.join(timeout=1.0)
@@ -114,6 +125,9 @@ led_controller = None
 
 def init_led_system(red_pin=18, green_pin=16):
     """Initialize the global LED controller"""
+    if not ENABLE_LED:
+        return True
+        
     global led_controller
     try:
         # Clean up existing controller if it exists
@@ -128,26 +142,28 @@ def init_led_system(red_pin=18, green_pin=16):
 
 def set_led_idle():
     """Set LED to idle state (blinking red)"""
-    if led_controller:
+    if ENABLE_LED and led_controller:
         led_controller.set_state(LEDState.IDLE)
 
 def set_led_processing():
     """Set LED to processing state (solid red)"""
-    if led_controller:
+    if ENABLE_LED and led_controller:
         led_controller.set_state(LEDState.PROCESSING)
 
 def set_led_success(duration=3.0):
     """Set LED to success state (solid green) with auto-return to idle"""
-    if led_controller:
+    if ENABLE_LED and led_controller:
         led_controller.set_state(LEDState.SUCCESS, duration)
 
 def set_led_off():
     """Turn off all LEDs"""
-    if led_controller:
+    if ENABLE_LED and led_controller:
         led_controller.set_state(LEDState.OFF)
 
 def cleanup_led_system():
     """Clean up LED system resources"""
+    if not ENABLE_LED:
+        return
     global led_controller
     if led_controller:
         led_controller.cleanup()

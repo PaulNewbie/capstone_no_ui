@@ -436,7 +436,7 @@ def admin_sync_database():
         print(f"\n📊 Database Totals:")
         print(f"   🎓 Total Students: {total_students}")
         print(f"   👔 Total Staff: {total_staff}")
-        
+            
     except gspread.exceptions.SpreadsheetNotFound:
         print(f"❌ Spreadsheet '{sheet_name}' not found")
         print("💡 Please check:")

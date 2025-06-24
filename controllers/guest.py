@@ -1,25 +1,42 @@
-# controllers/guest.py - Updated for new database structure (keeps existing imports)
+# controllers/guest.py - Updated with LED and Buzzer Integration
 
 from services.license_reader import *
 from services.helmet_infer import verify_helmet
 from services.time_tracker import *
 from services.led_control import *  
+from services.buzzer_control import *
 from utils.display_helpers import display_separator, display_verification_result
 from utils.gui_helpers import show_results_gui, get_guest_info_gui, updated_guest_office_gui
 import difflib
 import time
 
+from database.db_operations import (
+    add_guest,
+    get_guest_time_status,
+    get_guest_from_database,
+    create_guest_time_data, 
+    process_guest_time_in,
+    process_guest_time_out
+)
+
 def guest_verification():
-    """Main guest verification workflow - updated for new database"""
+    """Main guest verification workflow with LED and buzzer integration"""
     print("\n🎫 GUEST VERIFICATION SYSTEM")
     
+    # Initialize buzzer system
+    init_buzzer()
+    
+    # Set LED to processing and play processing sound
     set_led_processing()
+    play_processing()
     
     # Step 1: Helmet verification
     print("🪖 Checking helmet...")
     if not verify_helmet():
         print("❌ Helmet verification failed")
         set_led_idle()
+        play_failure()
+        cleanup_buzzer()
         input("\n📱 Press Enter to return...")
         return
     
@@ -32,6 +49,8 @@ def guest_verification():
     if not image_path:
         print("❌ License capture failed")
         set_led_idle()
+        play_failure()
+        cleanup_buzzer()
         input("\n📱 Press Enter to return...")
         return
     
@@ -55,8 +74,10 @@ def guest_verification():
         
         if time_result['success']:
             set_led_success(duration=5.0)
+            play_success()
         else:
             set_led_idle()
+            play_failure()
         
     elif current_status == 'OUT' and guest_info is not None:
         # Process returning guest TIME IN
@@ -69,6 +90,8 @@ def guest_verification():
         if not updated_guest_info:
             print("❌ Office update cancelled")
             set_led_idle()
+            play_failure()
+            cleanup_buzzer()
             input("\n📱 Press Enter to return...")
             return
         
@@ -102,11 +125,14 @@ def guest_verification():
             
             if time_result['success']:
                 set_led_success(duration=5.0)
+                play_success()
             else:
                 set_led_idle()
+                play_failure()
         else:
             print("❌ Guest verification failed")
             set_led_idle()
+            play_failure()
         
     else:
         # New guest TIME IN
@@ -117,6 +143,8 @@ def guest_verification():
         if not guest_info_input:
             print("❌ Guest info cancelled")
             set_led_idle()
+            play_failure()
+            cleanup_buzzer()
             input("\n📱 Press Enter to return...")
             return
         
@@ -146,19 +174,23 @@ def guest_verification():
             
             if time_result['success']:
                 set_led_success(duration=5.0)
+                play_success()
             else:
                 set_led_idle()
+                play_failure()
         else:
             print("❌ Guest verification failed")
             set_led_idle()
+            play_failure()
     
+    # Clean up buzzer before returning
+    cleanup_buzzer()
     input("\n📱 Press Enter to return...")
 
 def store_guest_in_database(guest_info):
     """Store or update guest information in the guests table"""
     try:
-        from database.db_operations import add_guest
-        
+
         guest_data = {
             'full_name': guest_info['name'],
             'plate_number': guest_info['plate_number'],
@@ -178,175 +210,3 @@ def store_guest_in_database(guest_info):
         print(f"❌ Error storing guest in database: {e}")
         return False
 
-def get_guest_time_status(detected_name, plate_number=None):
-    """Get current time status of guest - updated for new database"""
-    try:
-        import sqlite3
-        from difflib import SequenceMatcher
-        
-        # Use the new centralized database
-        conn = sqlite3.connect("database/motorpass.db")
-        cursor = conn.cursor()
-        
-        # Get latest record for each guest from time_tracking
-        cursor.execute("""
-            SELECT user_id, user_name, action, date, time,
-                   ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY timestamp DESC) as row_num
-            FROM time_tracking 
-            WHERE user_type = 'GUEST'
-        """)
-        
-        all_records = cursor.fetchall()
-        conn.close()
-        
-        # Filter to latest records only
-        latest_records = [record for record in all_records if record[5] == 1]
-        
-        if not latest_records:
-            return None, None
-        
-        print(f"🔍 Checking against {len(latest_records)} guest records...")
-        
-        # Find best name match
-        best_match = None
-        highest_similarity = 0.0
-        
-        for record in latest_records:
-            guest_name = record[1]  # user_name
-            
-            # Calculate similarity
-            similarity = SequenceMatcher(None, detected_name.upper(), guest_name.upper()).ratio()
-            
-            # Boost for substring matches
-            if (detected_name.upper() in guest_name.upper() or 
-                guest_name.upper() in detected_name.upper()):
-                similarity = max(similarity, 0.8)
-            
-            # Boost for plate match if provided
-            if plate_number:
-                guest_plate = record[0].replace('GUEST_', '')  # user_id
-                if plate_number.upper() == guest_plate.upper():
-                    similarity = max(similarity, 0.9)
-            
-            if similarity > highest_similarity and similarity > 0.6:
-                highest_similarity = similarity
-                best_match = record
-        
-        if best_match:
-            # Get additional guest info from guests table if needed
-            guest_db_info = get_guest_from_database(
-                plate_number=best_match[0].replace('GUEST_', ''),
-                name=best_match[1]
-            )
-            
-            guest_info = {
-                'name': best_match[1],  # user_name
-                'student_id': best_match[0],  # user_id (GUEST_PLATE format)
-                'guest_number': best_match[0].replace('GUEST_', ''),  # Just the plate number
-                'plate_number': best_match[0].replace('GUEST_', ''),
-                'office': guest_db_info['office'] if guest_db_info else 'Previous Visit',
-                'current_status': best_match[2],  # action (IN/OUT)
-                'last_date': best_match[3],
-                'last_time': best_match[4],
-                'similarity_score': highest_similarity
-            }
-            
-            return best_match[2], guest_info  # action (IN/OUT), guest_info
-        
-        return None, None
-        
-    except Exception as e:
-        print(f"❌ Error checking guest status: {e}")
-        return None, None
-
-def get_guest_from_database(plate_number=None, name=None):
-    """Retrieve guest information from guests table"""
-    try:
-        from database.db_operations import get_guest_by_plate, get_guest_by_name_and_plate
-        
-        if plate_number and name:
-            guest_data = get_guest_by_name_and_plate(name, plate_number)
-        elif plate_number:
-            guest_data = get_guest_by_plate(plate_number)
-        else:
-            return None
-        
-        if guest_data:
-            return {
-                'guest_id': guest_data['guest_id'],
-                'name': guest_data['full_name'],
-                'plate_number': guest_data['plate_number'],
-                'office': guest_data['office_visiting'],
-                'created_date': guest_data['created_date'],
-                'last_visit': guest_data.get('last_visit', guest_data['created_date'])
-            }
-        
-        return None
-        
-    except Exception as e:
-        print(f"❌ Error retrieving guest from database: {e}")
-        return None
-
-def create_guest_time_data(guest_info):
-    """Create standardized guest data for time tracking - simplified for guests"""
-    return {
-        'name': guest_info['name'],
-        'unified_id': f"GUEST_{guest_info['plate_number']}",
-        'student_id': f"GUEST_{guest_info['plate_number']}",
-        'user_type': 'GUEST',
-        'full_name': guest_info['name'],
-        'confidence': 100
-    }
-
-def process_guest_time_in(guest_info):
-    """Process guest time in - using new database functions"""
-    try:
-        from database.db_operations import record_time_in
-        
-        guest_time_data = create_guest_time_data(guest_info)
-        
-        if record_time_in(guest_time_data):
-            return {
-                'success': True,
-                'status': "✅ GUEST TIME IN SUCCESSFUL",
-                'message': f"✅ TIME IN SUCCESSFUL - {time.strftime('%H:%M:%S')}",
-                'color': "🟢"
-            }
-        else:
-            return {
-                'success': False,
-                'status': "❌ TIME IN FAILED",
-                'message': "❌ Failed to record TIME IN",
-                'color': "🔴"
-            }
-            
-    except ImportError:
-        print(f"❌ Error TIME OUT!!!: {e}")
-        return None
-        
-
-def process_guest_time_out(guest_info):
-    """Process guest time out - using new database functions"""
-    try:
-        from database.db_operations import record_time_out
-        
-        guest_time_data = create_guest_time_data(guest_info)
-        
-        if record_time_out(guest_time_data):
-            return {
-                'success': True,
-                'status': "✅ GUEST TIME OUT SUCCESSFUL",
-                'message': f"✅ TIME OUT SUCCESSFUL - {time.strftime('%H:%M:%S')}",
-                'color': "🟢"
-            }
-        else:
-            return {
-                'success': False,
-                'status': "❌ TIME OUT FAILED",
-                'message': "❌ Failed to record TIME OUT",
-                'color': "🔴"
-            }
-            
-    except ImportError:
-        print(f"❌ Error TIME OUT!!!: {e}")
-        return None
