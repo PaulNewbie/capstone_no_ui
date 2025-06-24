@@ -1,4 +1,4 @@
-# database/db_operations.py - Simplified version using ONLY motorpass.db
+# database/db_operations.py - Updated version with proper guest handling
 
 import sqlite3
 import os
@@ -12,14 +12,14 @@ MOTORPASS_DB = "database/motorpass.db"
 # =================== DATABASE INITIALIZATION ===================
 
 def initialize_all_databases():
-    """Initialize the centralized motorpass database"""
+    """Initialize the centralized motorpass database with updated schema"""
     try:
         os.makedirs("database", exist_ok=True)
         conn = sqlite3.connect(MOTORPASS_DB)
         conn.execute("PRAGMA foreign_keys = ON")
         cursor = conn.cursor()
         
-        # Create all tables
+        # Create all tables with updated schema
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS students (
                 student_id TEXT PRIMARY KEY,
@@ -48,13 +48,15 @@ def initialize_all_databases():
             )
         ''')
         
+        # Updated guests table - only essential fields
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS guests (
                 guest_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 full_name TEXT NOT NULL,
                 plate_number TEXT NOT NULL,
                 office_visiting TEXT NOT NULL,
-                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_visit TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
@@ -84,6 +86,8 @@ def initialize_all_databases():
         # Create indexes
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_students_name ON students(full_name)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_staff_name ON staff(full_name)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_guests_name ON guests(full_name)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_guests_plate ON guests(plate_number)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_time_tracking_user ON time_tracking(user_id, user_type)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_time_tracking_date ON time_tracking(date)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_current_status_type ON current_status(user_type)')
@@ -98,10 +102,180 @@ def initialize_all_databases():
         print(f"❌ Database initialization error: {e}")
         return False
 
+# =================== GUEST OPERATIONS ===================
+
+def add_guest(guest_data: Dict) -> str:
+    """Add or update a guest record and return plate_number (guest number)"""
+    try:
+        conn = sqlite3.connect(MOTORPASS_DB)
+        cursor = conn.cursor()
+        
+        # Check if guest already exists by plate number (guest number)
+        cursor.execute('''
+            SELECT plate_number FROM guests 
+            WHERE plate_number = ?
+        ''', (guest_data['plate_number'],))
+        
+        existing_guest = cursor.fetchone()
+        
+        if existing_guest:
+            # Update existing guest info
+            cursor.execute('''
+                UPDATE guests 
+                SET full_name = ?, office_visiting = ?, last_visit = CURRENT_TIMESTAMP
+                WHERE plate_number = ?
+            ''', (guest_data['full_name'], guest_data['office_visiting'], guest_data['plate_number']))
+            
+            conn.commit()
+            conn.close()
+            print(f"✅ Updated guest: {guest_data['full_name']} (Guest No: {guest_data['plate_number']})")
+            return guest_data['plate_number']
+        else:
+            # Insert new guest
+            cursor.execute('''
+                INSERT INTO guests (full_name, plate_number, office_visiting)
+                VALUES (?, ?, ?)
+            ''', (
+                guest_data['full_name'],
+                guest_data['plate_number'],
+                guest_data['office_visiting']
+            ))
+            
+            conn.commit()
+            conn.close()
+            print(f"✅ Added new guest: {guest_data['full_name']} (Guest No: {guest_data['plate_number']})")
+            return guest_data['plate_number']
+        
+    except sqlite3.Error as e:
+        print(f"❌ Error adding guest: {e}")
+        return ""
+
+def get_guest_by_plate(plate_number: str) -> Optional[Dict]:
+    """Get guest by plate number (most recent)"""
+    try:
+        conn = sqlite3.connect(MOTORPASS_DB)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT guest_id, full_name, plate_number, office_visiting, created_date, last_visit
+            FROM guests 
+            WHERE plate_number = ?
+            ORDER BY last_visit DESC
+            LIMIT 1
+        ''', (plate_number,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'guest_id': row[0],
+                'full_name': row[1],
+                'plate_number': row[2],
+                'office_visiting': row[3],
+                'created_date': row[4],
+                'last_visit': row[5]
+            }
+        return None
+        
+    except sqlite3.Error as e:
+        print(f"❌ Error fetching guest: {e}")
+        return None
+
+def get_guest_by_name_and_plate(name: str, plate_number: str) -> Optional[Dict]:
+    """Get guest by name and plate number"""
+    try:
+        conn = sqlite3.connect(MOTORPASS_DB)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT guest_id, full_name, plate_number, office_visiting, created_date, last_visit
+            FROM guests 
+            WHERE full_name = ? AND plate_number = ?
+            ORDER BY last_visit DESC
+            LIMIT 1
+        ''', (name, plate_number))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'guest_id': row[0],
+                'full_name': row[1],
+                'plate_number': row[2],
+                'office_visiting': row[3],
+                'created_date': row[4],
+                'last_visit': row[5]
+            }
+        return None
+        
+    except sqlite3.Error as e:
+        print(f"❌ Error fetching guest: {e}")
+        return None
+
+def get_all_guests() -> List[Dict]:
+    """Get all guests ordered by last visit"""
+    try:
+        conn = sqlite3.connect(MOTORPASS_DB)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT guest_id, full_name, plate_number, office_visiting, created_date, last_visit
+            FROM guests 
+            ORDER BY last_visit DESC
+        ''')
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [{
+            'guest_id': row[0],
+            'full_name': row[1],
+            'plate_number': row[2],
+            'office_visiting': row[3],
+            'created_date': row[4],
+            'last_visit': row[5]
+        } for row in rows]
+        
+    except sqlite3.Error as e:
+        print(f"❌ Error fetching guests: {e}")
+        return []
+
+def search_guests(search_term: str) -> List[Dict]:
+    """Search guests by name or plate number"""
+    try:
+        conn = sqlite3.connect(MOTORPASS_DB)
+        cursor = conn.cursor()
+        
+        search_pattern = f"%{search_term}%"
+        cursor.execute('''
+            SELECT guest_id, full_name, plate_number, office_visiting, created_date, last_visit
+            FROM guests 
+            WHERE full_name LIKE ? OR plate_number LIKE ?
+            ORDER BY last_visit DESC
+        ''', (search_pattern, search_pattern))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [{
+            'guest_id': row[0],
+            'full_name': row[1],
+            'plate_number': row[2],
+            'office_visiting': row[3],
+            'created_date': row[4],
+            'last_visit': row[5]
+        } for row in rows]
+        
+    except sqlite3.Error as e:
+        print(f"❌ Error searching guests: {e}")
+        return []
+
 # =================== USER LOOKUP ===================
 
 def get_user_by_id(user_id: str) -> Optional[Dict]:
-    """Get user info by ID (works for both students and staff)"""
+    """Get user info by ID (works for students, staff, and guests)"""
     try:
         conn = sqlite3.connect(MOTORPASS_DB)
         cursor = conn.cursor()
@@ -153,6 +327,26 @@ def get_user_by_id(user_id: str) -> Optional[Dict]:
                 'user_type': 'STAFF',
                 'unified_id': row[0]
             }
+        
+        # Try guest (for GUEST_ prefixed IDs)
+        if user_id.startswith('GUEST_'):
+            plate_number = user_id.replace('GUEST_', '')
+            guest = get_guest_by_plate(plate_number)
+            if guest:
+                conn.close()
+                return {
+                    'guest_id': guest['guest_id'],
+                    'full_name': guest['full_name'],
+                    'plate_number': guest['plate_number'],
+                    'office_visiting': guest['office_visiting'],
+                    'user_type': 'GUEST',
+                    'unified_id': user_id,
+                    # No license fields for guests
+                    'license_number': None,
+                    'expiration_date': None,
+                    'course': None,
+                    'staff_role': None
+                }
         
         conn.close()
         return None
@@ -223,7 +417,7 @@ def record_time_out(user_info: Dict) -> bool:
         
         user_id = user_info.get('unified_id', user_info.get('student_id', ''))
         user_name = user_info.get('name', user_info.get('full_name', ''))
-        user_type = user_info.get('user_type', 'STUDENT')
+        user_type = user_info.get('user_type', 'GUEST')
         current_date = datetime.now().strftime('%Y-%m-%d')
         current_time = datetime.now().strftime('%H:%M:%S')
         
@@ -358,6 +552,10 @@ def get_database_stats() -> Dict:
         cursor.execute('SELECT COUNT(*) FROM staff')
         stats['total_staff'] = stats['total_staff_registered'] = cursor.fetchone()[0]
         
+        # Count guests
+        cursor.execute('SELECT COUNT(*) FROM guests')
+        stats['total_guests'] = cursor.fetchone()[0]
+        
         # Count currently inside
         cursor.execute('SELECT COUNT(*) FROM current_status WHERE status = "IN"')
         stats['users_currently_in'] = cursor.fetchone()[0]
@@ -368,6 +566,9 @@ def get_database_stats() -> Dict:
         
         cursor.execute('SELECT COUNT(*) FROM current_status WHERE status = "IN" AND user_type = "STAFF"')
         stats['staff_currently_in'] = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM current_status WHERE status = "IN" AND user_type = "GUEST"')
+        stats['guests_currently_in'] = cursor.fetchone()[0]
         
         # Today's activity
         today = datetime.now().strftime('%Y-%m-%d')
@@ -402,6 +603,37 @@ def backup_databases(backup_dir: str = "backups") -> bool:
         print(f"❌ Backup error: {e}")
         return False
 
+# =================== DATABASE MIGRATION ===================
+
+def migrate_guest_table():
+    """Migrate existing guests table to new schema"""
+    try:
+        conn = sqlite3.connect(MOTORPASS_DB)
+        cursor = conn.cursor()
+        
+        # Check if old guests table exists and has old structure
+        cursor.execute("PRAGMA table_info(guests)")
+        columns = [row[1] for row in cursor.fetchall()]
+        
+        if 'last_visit' not in columns:
+            print("🔄 Migrating guests table to new schema...")
+            
+            # Add new column
+            cursor.execute('ALTER TABLE guests ADD COLUMN last_visit TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+            
+            # Update last_visit to created_date for existing records
+            cursor.execute('UPDATE guests SET last_visit = created_date')
+            
+            print("✅ Guests table migration completed")
+        
+        conn.commit()
+        conn.close()
+        return True
+        
+    except sqlite3.Error as e:
+        print(f"❌ Migration error: {e}")
+        return False
+
 # =================== LEGACY COMPATIBILITY ===================
 
 def init_student_database():
@@ -411,3 +643,12 @@ def init_student_database():
 def init_time_database():
     """Legacy compatibility"""
     return initialize_all_databases()
+
+# =================== INITIALIZATION WITH MIGRATION ===================
+
+def initialize_with_migration():
+    """Initialize database and run migrations"""
+    success = initialize_all_databases()
+    if success:
+        migrate_guest_table()
+    return success

@@ -383,6 +383,12 @@ def extract_guest_name_from_license(ocr_lines: List[str]) -> str:
     potential_names = []
     name_marker_index = -1
     
+    # Helper function to clean name parts (remove dots and other unwanted characters)
+    def clean_name_part(name_part):
+        # Remove dots, extra spaces, and keep only letters and spaces
+        cleaned = re.sub(r'[^A-Z\s]', '', name_part.strip().upper())
+        return cleaned.strip()
+    
     # First pass: find name markers (handle variations with dots/commas)
     for i, line in enumerate(ocr_lines):
         line_clean = line.strip().upper()
@@ -407,14 +413,17 @@ def extract_guest_name_from_license(ocr_lines: List[str]) -> str:
                     # Require exactly one comma for Philippine license format
                     if line_clean.count(',') == 1:
                         parts = line_clean.split(',')
-                        lastname = parts[0].strip()
-                        firstname = parts[1].strip()
+                        lastname = clean_name_part(parts[0])  # Remove dots here!
+                        firstname = clean_name_part(parts[1])  # Remove dots here!
+                        
                         if (lastname.replace(' ', '').isalpha() and 
                             firstname.replace(' ', '').isalpha() and
                             len(lastname) >= 2 and len(firstname) >= 2 and
                             len(lastname) <= 20 and len(firstname) <= 30):
+                            # Reconstruct the clean name
+                            clean_line = f"{lastname}, {firstname}"
                             score = 100  # Highest score for lines after name markers
-                            potential_names.append((line_clean, score))
+                            potential_names.append((clean_line, score))
                             # Don't continue looking past the name field
                             break
         
@@ -452,18 +461,20 @@ def extract_guest_name_from_license(ocr_lines: List[str]) -> str:
         
         # Philippine license format: exactly one comma (LASTNAME,FIRSTNAME)
         parts = line_clean.split(',')
-        lastname = parts[0].strip()
-        firstname = parts[1].strip()
+        lastname = clean_name_part(parts[0])  # Remove dots here too!
+        firstname = clean_name_part(parts[1])  # Remove dots here too!
+        
         if (lastname.replace(' ', '').isalpha() and 
             firstname.replace(' ', '').isalpha() and
             len(lastname) >= 2 and len(firstname) >= 2 and
             len(lastname) <= 20 and len(firstname) <= 30):
             # Check it's not an address
-            if not any(addr_marker in line_clean for addr_marker in ['BLK', 'LOT', 'PH', 'PHASE']):
+            clean_line = f"{lastname}, {firstname}"
+            if not any(addr_marker in clean_line for addr_marker in ['BLK', 'LOT', 'PH', 'PHASE']):
                 score += 20  # Base score for proper format
                 
                 # Length scoring
-                if 10 <= len(line_clean) <= 30: 
+                if 10 <= len(clean_line) <= 30: 
                     score += 3
                 
                 # Proximity to name marker
@@ -477,7 +488,7 @@ def extract_guest_name_from_license(ocr_lines: List[str]) -> str:
                         score -= 10  # Too far from marker
                 
                 if score > 0:
-                    potential_names.append((line_clean, score))
+                    potential_names.append((clean_line, score))
     
     if potential_names:
         potential_names.sort(key=lambda x: x[1], reverse=True)
@@ -485,16 +496,36 @@ def extract_guest_name_from_license(ocr_lines: List[str]) -> str:
         return _format_extracted_name_simple(best_name)
     
     return "Guest"
-          
+            
 def _format_extracted_name_simple(name: str) -> str:
+    """
+    Format the extracted name as ALL CAPITAL LETTERS in SURNAME, FIRSTNAME MIDDLENAME format
+    """
     if ',' in name:
         parts = name.split(',')
-        if len(parts) == 2:
-            last_name = parts[0].strip().title()
-            first_part = parts[1].strip().title()
-            return f"{first_part} {last_name}"
+        if len(parts) == 3:
+            surname = parts[0].strip().upper()
+            firstname = parts[1].strip().upper()
+            
+            return f"{surname}, {firstname}"
+        
+        elif len(parts) == 2:
+            # Handle 2-part format: SURNAME, FIRSTNAME MIDDLENAME
+            surname = parts[0].strip().upper()
+            firstname_part = parts[1].strip().upper()
+            
+            # Check if there's a space in firstname_part (indicating middle name)
+            if ' ' in firstname_part:
+                name_parts = firstname_part.split(' ', 1)  # Split only on first space
+                firstname = name_parts[0].strip()
+                middlename = name_parts[1].strip()
+                
+                return f"{surname}, {firstname}, {middlename}"
+            else:
+                # No middle name, just firstname
+                return f"{surname}, {firstname_part}"
     
-    return name.title()
+    return name.upper()
 
 def _detect_name_pattern(raw_text: str) -> Optional[str]:
     lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
@@ -580,7 +611,7 @@ def _detect_name_pattern(raw_text: str) -> Optional[str]:
                         if (lastname and firstname and
                             lastname.replace(' ', '').isalpha() and 
                             firstname.replace(' ', '').isalpha() and
-                            len(lastname) >= 2 and len(firstname) >= 2 and
+                            len(lastname) >= 3 and len(firstname) >= 2 and
                             len(lastname) <= 20 and len(firstname) <= 30):
                             name_found = clean_name.title()
                             continue  # Continue to check for stop markers
