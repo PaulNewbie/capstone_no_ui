@@ -1,5 +1,5 @@
 # services/time_tracker.py
-
+'''
 import sqlite3
 from datetime import datetime
 
@@ -70,3 +70,4 @@ def record_time_out(student_info):
     except Exception as e:
         print(f"❌ Failed to record time OUT: {e}")
         return False
+'''

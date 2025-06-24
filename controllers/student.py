@@ -1,10 +1,11 @@
-# controllers/student.py - Simplified with Clean Logging + Buzzer Integration
+# controllers/student.py - Updated with GUI Integration (Hybrid Approach)
 
 from services.fingerprint import authenticate_fingerprint
 from services.license_reader import *
 from services.helmet_infer import verify_helmet
 from services.led_control import *
 from services.buzzer_control import *
+from services.rpi_camera import ensure_camera_cleanup
 
 # Import database operations
 from database.db_operations import (
@@ -18,117 +19,208 @@ from utils.gui_helpers import show_results_gui
 
 import time
 from datetime import datetime
+import tkinter as tk
 
 def student_verification():
-    """Main student/staff verification workflow with integrated time tracking, LED status and buzzer"""
-    print("\n🎓👔 STUDENT/STAFF VERIFICATION & TIME TRACKING SYSTEM")
+    """Main student/staff verification with GUI"""
+    print("\n🎓👔 STUDENT/STAFF VERIFICATION")
+    print("🖥️ Opening GUI interface...")
     
-    # Initialize buzzer system
+    # Import GUI here to avoid circular imports
+    from ui.student_gui import StudentVerificationGUI
+    
+    # Clean up camera before starting
+    ensure_camera_cleanup()
+    
+    # Create and run GUI
+    gui = StudentVerificationGUI(run_verification_with_gui)
+    gui.run()
+    
+    # Ensure cleanup after GUI closes
+    ensure_camera_cleanup()
+    
+def run_verification_with_gui(status_callback):
+    """Run verification steps with GUI status updates"""
+    
+    # Initialize systems
     init_buzzer()
-    
-    # Set LED to processing state and play processing sound when verification starts
     set_led_processing()
     play_processing()
     
-    # Step 1: Helmet verification (always required)
-    print("🪖 Checking helmet...")
-    if not verify_helmet():
-        print("❌ Helmet verification failed")
-        set_led_idle()
-        play_failure()
-        cleanup_buzzer()
-        input("\n📱 Press Enter to return to main menu...")
-        return
-    print("✅ Helmet verified")
-    
-    # Step 2: Fingerprint authentication
-    print("🔒 Place your finger on the sensor...")
-    user_info = authenticate_fingerprint()
-    
-    if not user_info:
-        print("❌ Authentication failed")
-        set_led_idle()
-        play_failure()
-        cleanup_buzzer()
-        input("\n📱 Press Enter to return to main menu...")
-        return
-    
-    user_type = user_info.get('user_type', 'STUDENT')
-    user_type_display = "Student" if user_type == 'STUDENT' else "Staff"
-    
-    print(f"✅ {user_info['name']} ({user_type_display} - ID: {user_info['unified_id']})")
-    
-    # Step 3: Check current time status first
-    current_status = get_student_time_status(user_info['unified_id'])
-    
-    # Step 4: License expiration check (only for TIME IN)
-    if current_status == 'OUT' or current_status is None:
-        license_expiration_valid = check_license_expiration(user_info)
-        if not license_expiration_valid:
-            print("❌ License expired")
+    try:
+        # Step 1: Helmet verification
+        status_callback({'current_step': '🪖 Checking helmet... (Check terminal for camera)'})
+        status_callback({'helmet_status': 'CHECKING'})
+        
+        print("\n" + "="*60)
+        print("🪖 HELMET VERIFICATION (Terminal Camera)")
+        print("="*60)
+        
+        if verify_helmet():
+            status_callback({'helmet_status': 'VERIFIED'})
+            status_callback({'current_step': '✅ Helmet verified successfully!'})
+            print("✅ Helmet verification successful")
+        else:
+            status_callback({'helmet_status': 'FAILED'})
+            status_callback({'current_step': '❌ Helmet verification failed'})
             set_led_idle()
             play_failure()
             cleanup_buzzer()
-            input("\n📱 Press Enter to return to main menu...")
-            return
-    
-    if current_status == 'OUT' or current_status is None:
-        # User is timing IN - full verification required
-        print(f"🟢 TIMING IN - Starting license verification for {user_type_display}...")
+            ensure_camera_cleanup()
+            return {'verified': False, 'reason': 'Helmet verification failed'}
         
-        # Capture and verify license
-        image_path = auto_capture_license_rpi(reference_name=user_info['name'], 
-                                           fingerprint_info=user_info)
+        # Step 2: Fingerprint authentication
+        status_callback({'current_step': '🔒 Place your finger on the sensor...'})
+        status_callback({'fingerprint_status': 'PROCESSING'})
         
-        if not image_path:
-            print("❌ License capture failed")
+        print("\n" + "="*60)
+        print("🔒 FINGERPRINT AUTHENTICATION")
+        print("="*60)
+        
+        user_info = authenticate_fingerprint()
+        
+        if not user_info:
+            status_callback({'fingerprint_status': 'FAILED'})
+            status_callback({'current_step': '❌ Fingerprint authentication failed'})
             set_led_idle()
             play_failure()
             cleanup_buzzer()
-            input("\n📱 Press Enter to return to main menu...")
-            return
+            ensure_camera_cleanup()
+            return {'verified': False, 'reason': 'Fingerprint authentication failed'}
         
-        is_fully_verified = complete_verification_flow(
-            image_path=image_path,
-            fingerprint_info=user_info,
-            helmet_verified=True,
-            license_expiration_valid=license_expiration_valid
-        )
+        status_callback({'fingerprint_status': 'VERIFIED'})
+        status_callback({'user_info': user_info})
+        status_callback({'current_step': f'✅ Authenticated: {user_info["name"]}'})
         
-        if is_fully_verified:
-            if record_time_in(user_info):
-                print(f"✅ TIME IN SUCCESSFUL - {time.strftime('%H:%M:%S')}")
-                set_led_success(duration=5.0)
-                play_success()
-            else:
-                print("❌ Failed to record TIME IN")
+        # Step 3: Check time status
+        current_status = get_student_time_status(user_info['unified_id'])
+        
+        # Step 4: License verification (only for TIME IN)
+        if current_status == 'OUT' or current_status is None:
+            # Check license expiration
+            license_expiration_valid = check_license_expiration(user_info)
+            
+            if not license_expiration_valid:
+                status_callback({'license_status': 'EXPIRED'})
+                status_callback({'current_step': '❌ License has expired'})
                 set_led_idle()
                 play_failure()
+                cleanup_buzzer()
+                ensure_camera_cleanup()
+                return {'verified': False, 'reason': 'License has expired'}
+            
+            status_callback({'license_status': 'VALID'})
+            
+            # License capture and verification
+            status_callback({'current_step': '📄 Capturing license... (Check terminal for camera)'})
+            
+            print("\n" + "="*60)
+            print("📄 LICENSE CAPTURE (Terminal Camera)")
+            print("="*60)
+            
+            image_path = auto_capture_license_rpi(
+                reference_name=user_info['name'],
+                fingerprint_info=user_info
+            )
+            
+            if not image_path:
+                status_callback({'current_step': '❌ License capture failed'})
+                set_led_idle()
+                play_failure()
+                cleanup_buzzer()
+                ensure_camera_cleanup()
+                return {'verified': False, 'reason': 'License capture failed'}
+            
+            # Verify license
+            is_fully_verified = complete_verification_flow(
+                image_path=image_path,
+                fingerprint_info=user_info,
+                helmet_verified=True,
+                license_expiration_valid=license_expiration_valid
+            )
+            
+            # Show verification summary
+            verification_summary = {
+                'helmet': True,
+                'fingerprint': True,
+                'license_valid': license_expiration_valid,
+                'license_detected': "Driver's License Detected" in str(is_fully_verified),
+                'name_match': is_fully_verified
+            }
+            status_callback({'verification_summary': verification_summary})
+            
+            if is_fully_verified:
+                # Record TIME IN
+                if record_time_in(user_info):
+                    timestamp = time.strftime('%H:%M:%S')
+                    status_callback({'current_step': f'✅ TIME IN recorded at {timestamp}'})
+                    set_led_success(duration=5.0)
+                    play_success()
+                    
+                    result = {
+                        'verified': True,
+                        'name': user_info['name'],
+                        'time_action': 'IN',
+                        'timestamp': timestamp
+                    }
+                else:
+                    status_callback({'current_step': '❌ Failed to record TIME IN'})
+                    set_led_idle()
+                    play_failure()
+                    result = {'verified': False, 'reason': 'Failed to record TIME IN'}
+            else:
+                status_callback({'current_step': '❌ Verification incomplete'})
+                set_led_idle()
+                play_failure()
+                result = {'verified': False, 'reason': 'Verification requirements not met'}
+                
         else:
-            print("❌ VERIFICATION INCOMPLETE - TIME IN DENIED")
-            set_led_idle()
-            play_failure()
+            # TIME OUT - simpler process
+            status_callback({'license_status': 'VALID'})
+            status_callback({'current_step': '🔴 Processing TIME OUT...'})
+            
+            # Show verification summary for TIME OUT
+            verification_summary = {
+                'helmet': True,
+                'fingerprint': True,
+                'license_valid': True,
+                'license_detected': True,
+                'name_match': True
+            }
+            status_callback({'verification_summary': verification_summary})
+            
+            if record_time_out(user_info):
+                timestamp = time.strftime('%H:%M:%S')
+                status_callback({'current_step': f'✅ TIME OUT recorded at {timestamp}'})
+                set_led_success(duration=5.0)
+                play_success()
+                
+                result = {
+                    'verified': True,
+                    'name': user_info['name'],
+                    'time_action': 'OUT',
+                    'timestamp': timestamp
+                }
+            else:
+                status_callback({'current_step': '❌ Failed to record TIME OUT'})
+                set_led_idle()
+                play_failure()
+                result = {'verified': False, 'reason': 'Failed to record TIME OUT'}
         
-    else:
-        # User is timing OUT - only helmet + fingerprint required
-        print(f"🔴 TIMING OUT {user_type_display}...")
-        print("🛡️ Drive safe!")
+        cleanup_buzzer()
+        ensure_camera_cleanup()
+        return result
         
-        if record_time_out(user_info):
-            print(f"✅ TIME OUT SUCCESSFUL - {time.strftime('%H:%M:%S')}")
-            set_led_success(duration=5.0)
-            play_success()
-        else:
-            print("❌ Failed to record TIME OUT")
-            set_led_idle()
-            play_failure()
-    
-    # Clean up buzzer before returning
-    cleanup_buzzer()
-    input("\n📱 Press Enter to return to main menu...")
-    
+    except Exception as e:
+        print(f"❌ Error during verification: {e}")
+        set_led_idle()
+        play_failure()
+        cleanup_buzzer()
+        ensure_camera_cleanup()
+        return {'verified': False, 'reason': str(e)}
+
 def check_license_expiration(student_info):
-    """Check if student's license is expired - simplified logging"""
+    """Check if student's license is expired"""
     try:
         expiration_date_str = student_info.get('license_expiration', '')
         
