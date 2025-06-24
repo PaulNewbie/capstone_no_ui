@@ -322,47 +322,38 @@ def admin_reset_all():
         print(f"❌ Reset error: {e}")
 
 def admin_sync_database():
-    """Sync database from Google Sheets - Updated for Students & Staff"""
+    """Sync database from Google Sheets - saves directly to motorpass.db"""
     try:
         import gspread
         from oauth2client.service_account import ServiceAccountCredentials
         import sqlite3
         from datetime import datetime
         
-        print("🔄 Starting database sync...")
+        print("🔄 Starting database sync from Google Sheets...")
         
+        # Google Sheets authentication
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_name("json_folder/credentials.json", scope)
         client = gspread.authorize(creds)
         
-        sheet = client.open("MotorPass Registration Form (Responses)").sheet1
+        # Open the spreadsheet
+        sheet_name = "MotorPass Registration Form (Responses)"
+        print(f"📊 Connecting to '{sheet_name}'...")
+        
+        sheet = client.open(sheet_name).sheet1
         rows = sheet.get_all_records()
         
-        conn = sqlite3.connect("database/students.db")
+        print(f"📋 Found {len(rows)} records in Google Sheets")
+        
+        # Connect to motorpass.db
+        conn = sqlite3.connect("database/motorpass.db")
         cursor = conn.cursor()
         
-        # Create new table with updated schema
-        cursor.execute('DROP TABLE IF EXISTS students')
-        cursor.execute('''
-            CREATE TABLE students (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                full_name TEXT NOT NULL,
-                license_number TEXT,
-                expiration_date TEXT,
-                plate_number TEXT,
-                course TEXT,
-                student_id TEXT,
-                staff_role TEXT,
-                staff_no TEXT,
-                user_type TEXT NOT NULL,
-                synced_at TEXT,
-                UNIQUE(student_id, staff_no)
-            )
-        ''')
+        students_added = 0
+        staff_added = 0
+        errors = 0
         
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        students_count = 0
-        staff_count = 0
+        print("💾 Saving to motorpass.db...")
         
         for row in rows:
             try:
@@ -380,63 +371,87 @@ def admin_sync_database():
                 if not full_name:
                     continue
                 
-                # Determine user type based on filled fields
+                # Determine if student or staff
                 if student_id and not staff_no:
-                    # This is a student
-                    user_type = 'STUDENT'
+                    # It's a student
                     cursor.execute('''
-                        INSERT INTO students (full_name, license_number, expiration_date, plate_number, 
-                                            course, student_id, staff_role, staff_no, user_type, synced_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (full_name, license_number, expiration_date, plate_number,
-                          course, student_id, None, None, user_type, current_time))
-                    students_count += 1
+                        INSERT OR REPLACE INTO students 
+                        (student_id, full_name, course, license_number, 
+                         license_expiration, plate_number, last_updated)
+                        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ''', (student_id, full_name, course, license_number, 
+                          expiration_date, plate_number))
+                    students_added += 1
                     
                 elif staff_no and not student_id:
-                    # This is a staff member
-                    user_type = 'STAFF'
+                    # It's a staff member
                     cursor.execute('''
-                        INSERT INTO students (full_name, license_number, expiration_date, plate_number, 
-                                            course, student_id, staff_role, staff_no, user_type, synced_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (full_name, license_number, expiration_date, plate_number,
-                          None, None, staff_role, staff_no, user_type, current_time))
-                    staff_count += 1
+                        INSERT OR REPLACE INTO staff 
+                        (staff_no, full_name, staff_role, license_number, 
+                         license_expiration, plate_number, last_updated)
+                        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ''', (staff_no, full_name, staff_role, license_number, 
+                          expiration_date, plate_number))
+                    staff_added += 1
                     
                 elif student_id and staff_no:
-                    # Both fields filled - this shouldn't happen, but handle gracefully
-                    print(f"⚠️ Warning: Both Student No. and Staff No. filled for {full_name}")
-                    # Default to student if both are filled
-                    user_type = 'STUDENT'
+                    # Both filled - handle as student by default
+                    print(f"⚠️ Both Student No. and Staff No. filled for {full_name}, treating as student")
                     cursor.execute('''
-                        INSERT INTO students (full_name, license_number, expiration_date, plate_number, 
-                                            course, student_id, staff_role, staff_no, user_type, synced_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (full_name, license_number, expiration_date, plate_number,
-                          course, student_id, None, None, user_type, current_time))
-                    students_count += 1
+                        INSERT OR REPLACE INTO students 
+                        (student_id, full_name, course, license_number, 
+                         license_expiration, plate_number, last_updated)
+                        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ''', (student_id, full_name, course, license_number, 
+                          expiration_date, plate_number))
+                    students_added += 1
                 else:
-                    # Neither student nor staff ID filled
+                    # Neither student nor staff ID
                     print(f"⚠️ Skipping {full_name} - No Student No. or Staff No.")
-                    continue
+                    errors += 1
                     
             except Exception as e:
                 print(f"❌ Error processing row for {row.get('Full Name', 'Unknown')}: {e}")
-                continue
+                errors += 1
         
+        # Commit all changes
         conn.commit()
+        
+        # Get final counts
+        cursor.execute('SELECT COUNT(*) FROM students')
+        total_students = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM staff')
+        total_staff = cursor.fetchone()[0]
+        
         conn.close()
         
-        total_synced = students_count + staff_count
-        print(f"✅ Database sync completed!")
-        print(f"📊 Synced {total_synced} records:")
-        print(f"   🎓 Students: {students_count}")
-        print(f"   👔 Staff: {staff_count}")
+        print("\n✅ Database sync completed!")
+        print(f"📊 Sync Results:")
+        print(f"   🎓 Students added/updated: {students_added}")
+        print(f"   👔 Staff added/updated: {staff_added}")
+        if errors > 0:
+            print(f"   ❌ Errors: {errors}")
+        
+        print(f"\n📊 Database Totals:")
+        print(f"   🎓 Total Students: {total_students}")
+        print(f"   👔 Total Staff: {total_staff}")
+        
+    except gspread.exceptions.SpreadsheetNotFound:
+        print(f"❌ Spreadsheet '{sheet_name}' not found")
+        print("💡 Please check:")
+        print("   1. The exact name of your Google Sheet")
+        print("   2. That the service account has access to the sheet")
+        print("   3. The sheet is shared with the service account email")
+        
+    except FileNotFoundError:
+        print("❌ credentials.json not found!")
+        print("💡 Please ensure json_folder/credentials.json exists")
         
     except Exception as e:
         print(f"❌ Sync failed: {e}")
         print("💡 Check your credentials.json and internet connection")
-        
+                    
 def admin_view_time_records():
     """View all time records with user type information"""
     records = get_all_time_records()

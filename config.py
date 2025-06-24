@@ -8,9 +8,6 @@ RPI_CAMERA_RESOLUTION = (1280, 720)  # HD resolution for RPi Camera 3
 RPI_CAMERA_FRAMERATE = 50
 RPI_CAMERA_WARMUP_TIME = 1  # seconds
 
-# Camera capture settings
-CAPTURE_QUALITY = 65  # JPEG quality (1-100)
-CAPTURE_FORMAT = 'JPEG'
 
 MAIN_MENU = {
     'title': f"🚗 {SYSTEM_NAME} - VERIFICATION SYSTEM",

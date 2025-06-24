@@ -5,7 +5,7 @@ import numpy as np
 import time
 import os
 from datetime import datetime
-from config import RPI_CAMERA_RESOLUTION, RPI_CAMERA_FRAMERATE, RPI_CAMERA_WARMUP_TIME, CAPTURE_QUALITY, CAPTURE_FORMAT
+from config import RPI_CAMERA_RESOLUTION, RPI_CAMERA_FRAMERATE, RPI_CAMERA_WARMUP_TIME
 
 try:
     from picamera2 import Picamera2

@@ -185,28 +185,17 @@ class MotorPassGUI:
         self.count_label.pack()
     
     def get_current_time_in_count(self):
-        """Get count of people currently timed in"""
+        """Get count of people currently timed in from centralized database"""
         try:
-            conn = sqlite3.connect("database/time_tracking.db")
+            conn = sqlite3.connect("database/motorpass.db")
             cursor = conn.cursor()
             
-            # Get the latest status for each person
-            cursor.execute("""
-                SELECT student_id, status, 
-                       ROW_NUMBER() OVER (PARTITION BY student_id ORDER BY timestamp DESC) as row_num
-                FROM time_records
-            """)
+            # Get count from current_status table
+            cursor.execute("SELECT COUNT(*) FROM current_status WHERE status = 'IN'")
+            count = cursor.fetchone()[0]
             
-            all_records = cursor.fetchall()
             conn.close()
-            
-            # Count people with status 'IN' in their latest record
-            in_count = 0
-            for record in all_records:
-                if record[2] == 1 and record[1] == 'IN':  # Latest record and status is IN
-                    in_count += 1
-            
-            return in_count
+            return count
             
         except Exception as e:
             print(f"Error getting time-in count: {e}")

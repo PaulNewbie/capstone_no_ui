@@ -1,226 +1,211 @@
-# database/db_operations.py - Updated for Students & Staff
+# database/db_operations.py - Simplified version using ONLY motorpass.db
 
 import sqlite3
 import os
 import time
 from datetime import datetime
+from typing import Optional, Dict, List
 
-# Database file paths
-STUDENT_DB_FILE = "database/students.db"
-TIME_TRACKING_DB = "database/time_tracking.db"
+# Single database file
+MOTORPASS_DB = "database/motorpass.db"
 
 # =================== DATABASE INITIALIZATION ===================
 
-def init_student_database():
-    """Initialize student/staff database with updated schema"""
+def initialize_all_databases():
+    """Initialize the centralized motorpass database"""
     try:
         os.makedirs("database", exist_ok=True)
-        conn = sqlite3.connect(STUDENT_DB_FILE)
+        conn = sqlite3.connect(MOTORPASS_DB)
+        conn.execute("PRAGMA foreign_keys = ON")
         cursor = conn.cursor()
         
-        # Drop old table and create new one with updated schema
-        cursor.execute('DROP TABLE IF EXISTS students')
-        
+        # Create all tables
         cursor.execute('''
-            CREATE TABLE students (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+            CREATE TABLE IF NOT EXISTS students (
+                student_id TEXT PRIMARY KEY,
                 full_name TEXT NOT NULL,
+                course TEXT NOT NULL,
                 license_number TEXT,
-                expiration_date TEXT,
+                license_expiration DATE,
                 plate_number TEXT,
-                course TEXT,
-                student_id TEXT,
-                staff_role TEXT,
-                staff_no TEXT,
-                user_type TEXT NOT NULL,
-                synced_at TEXT,
-                UNIQUE(student_id, staff_no)
+                fingerprint_slot INTEGER UNIQUE,
+                enrolled_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
-        # Create indexes for better performance
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_students_student_id ON students(student_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_students_staff_no ON students(staff_no)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_students_user_type ON students(user_type)')
-        
-        conn.commit()
-        conn.close()
-        print("✅ Student/Staff database initialized with new schema")
-        return True
-    except sqlite3.Error as e:
-        print(f"❌ Student database initialization error: {e}")
-        return False
-
-def migrate_time_database():
-    """Migrate existing time_tracking database to support user_type column"""
-    try:
-        if not os.path.exists(TIME_TRACKING_DB):
-            return True  # No existing database to migrate
-        
-        print("🔄 Migrating existing time database...")
-        
-        conn = sqlite3.connect(TIME_TRACKING_DB)
-        cursor = conn.cursor()
-        
-        # Check if user_type column already exists in time_records
-        cursor.execute("PRAGMA table_info(time_records)")
-        columns = [column[1] for column in cursor.fetchall()]
-        
-        if 'user_type' not in columns:
-            print("📋 Adding user_type column to time_records...")
-            cursor.execute("ALTER TABLE time_records ADD COLUMN user_type TEXT NOT NULL DEFAULT 'STUDENT'")
-        
-        # Check if user_type column exists in current_status
-        cursor.execute("PRAGMA table_info(current_status)")
-        columns = [column[1] for column in cursor.fetchall()]
-        
-        if 'user_type' not in columns:
-            print("📋 Adding user_type column to current_status...")
-            cursor.execute("ALTER TABLE current_status ADD COLUMN user_type TEXT NOT NULL DEFAULT 'STUDENT'")
-        
-        conn.commit()
-        conn.close()
-        
-        print("✅ Time database migration completed")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Migration failed: {e}")
-        return False
-
-def init_time_database():
-    """Initialize time tracking database with migration support"""
-    try:
-        os.makedirs("database", exist_ok=True)
-        
-        # First try migration if database exists
-        if os.path.exists(TIME_TRACKING_DB):
-            if not migrate_time_database():
-                return False
-        
-        # Now ensure all tables and columns exist
-        conn = sqlite3.connect(TIME_TRACKING_DB)
-        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS staff (
+                staff_no TEXT PRIMARY KEY,
+                full_name TEXT NOT NULL,
+                staff_role TEXT NOT NULL,
+                license_number TEXT,
+                license_expiration DATE,
+                plate_number TEXT,
+                fingerprint_slot INTEGER UNIQUE,
+                enrolled_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS time_records (
+            CREATE TABLE IF NOT EXISTS guests (
+                guest_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                full_name TEXT NOT NULL,
+                plate_number TEXT NOT NULL,
+                office_visiting TEXT NOT NULL,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS time_tracking (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id TEXT NOT NULL,
-                student_name TEXT NOT NULL,
-                user_type TEXT NOT NULL DEFAULT 'STUDENT',
-                date TEXT NOT NULL,
-                time TEXT NOT NULL,
-                status TEXT NOT NULL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                user_id TEXT NOT NULL,
+                user_name TEXT NOT NULL,
+                user_type TEXT NOT NULL CHECK(user_type IN ('STUDENT', 'STAFF', 'GUEST')),
+                action TEXT NOT NULL CHECK(action IN ('IN', 'OUT')),
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                date DATE NOT NULL,
+                time TIME NOT NULL
             )
         ''')
         
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS current_status (
-                student_id TEXT PRIMARY KEY,
-                student_name TEXT NOT NULL,
-                user_type TEXT NOT NULL DEFAULT 'STUDENT',
-                current_status TEXT NOT NULL,
-                last_update DATETIME DEFAULT CURRENT_TIMESTAMP
+                user_id TEXT PRIMARY KEY,
+                user_name TEXT NOT NULL,
+                user_type TEXT NOT NULL CHECK(user_type IN ('STUDENT', 'STAFF', 'GUEST')),
+                status TEXT NOT NULL CHECK(status IN ('IN', 'OUT')),
+                last_action_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
-        # Create indexes for better performance
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_time_records_student_id ON time_records(student_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_time_records_status ON time_records(status)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_time_records_user_type ON time_records(user_type)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_current_status_status ON current_status(current_status)')
+        # Create indexes
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_students_name ON students(full_name)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_staff_name ON staff(full_name)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_time_tracking_user ON time_tracking(user_id, user_type)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_time_tracking_date ON time_tracking(date)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_current_status_type ON current_status(user_type)')
         
         conn.commit()
         conn.close()
+        
+        print("✅ MotorPass database initialized successfully")
         return True
+        
     except sqlite3.Error as e:
-        print(f"❌ Time database initialization error: {e}")
+        print(f"❌ Database initialization error: {e}")
         return False
 
-# =================== USER LOOKUP FUNCTIONS ===================
+# =================== USER LOOKUP ===================
 
-def get_user_by_id(user_id):
-    """Fetch user info by Student ID or Staff No"""
+def get_user_by_id(user_id: str) -> Optional[Dict]:
+    """Get user info by ID (works for both students and staff)"""
     try:
-        conn = sqlite3.connect(STUDENT_DB_FILE)
+        conn = sqlite3.connect(MOTORPASS_DB)
         cursor = conn.cursor()
         
-        # Try to find by student_id first, then by staff_no
+        # Try student first
         cursor.execute('''
-            SELECT full_name, license_number, expiration_date, plate_number, 
-                   course, student_id, staff_role, staff_no, user_type 
-            FROM students 
-            WHERE student_id = ? OR staff_no = ?
-        ''', (user_id, user_id))
+            SELECT student_id, full_name, course, license_number, 
+                   license_expiration, plate_number, fingerprint_slot
+            FROM students WHERE student_id = ?
+        ''', (user_id,))
         
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result:
+        row = cursor.fetchone()
+        if row:
+            conn.close()
             return {
-                'full_name': result[0],
-                'license_number': result[1],
-                'expiration_date': result[2],
-                'plate_number': result[3],
-                'course': result[4],
-                'student_id': result[5],
-                'staff_role': result[6],
-                'staff_no': result[7],
-                'user_type': result[8],
-                # Create unified ID field for time tracking
-                'unified_id': result[5] if result[8] == 'STUDENT' else result[7]
+                'student_id': row[0],
+                'full_name': row[1],
+                'course': row[2],
+                'license_number': row[3],
+                'expiration_date': row[4],
+                'plate_number': row[5],
+                'fingerprint_slot': row[6],
+                'staff_no': None,
+                'staff_role': None,
+                'user_type': 'STUDENT',
+                'unified_id': row[0]
             }
+        
+        # Try staff
+        cursor.execute('''
+            SELECT staff_no, full_name, staff_role, license_number, 
+                   license_expiration, plate_number, fingerprint_slot
+            FROM staff WHERE staff_no = ?
+        ''', (user_id,))
+        
+        row = cursor.fetchone()
+        if row:
+            conn.close()
+            return {
+                'staff_no': row[0],
+                'full_name': row[1],
+                'staff_role': row[2],
+                'license_number': row[3],
+                'expiration_date': row[4],
+                'plate_number': row[5],
+                'fingerprint_slot': row[6],
+                'student_id': None,
+                'course': None,
+                'user_type': 'STAFF',
+                'unified_id': row[0]
+            }
+        
+        conn.close()
         return None
         
     except sqlite3.Error as e:
         print(f"❌ Error fetching user: {e}")
         return None
 
-def get_student_by_id(student_id):
-    """Legacy function - redirects to get_user_by_id"""
+# Legacy support
+def get_student_by_id(student_id: str) -> Optional[Dict]:
     return get_user_by_id(student_id)
 
-# =================== TIME TRACKING OPERATIONS ===================
+# =================== TIME TRACKING ===================
 
-def get_student_time_status(user_id):
-    """Get current time status (IN/OUT) for student or staff"""
+def get_student_time_status(user_id: str) -> Optional[str]:
+    """Get current time status for a user"""
     try:
-        conn = sqlite3.connect(TIME_TRACKING_DB)
+        conn = sqlite3.connect(MOTORPASS_DB)
         cursor = conn.cursor()
         
-        cursor.execute('SELECT current_status FROM current_status WHERE student_id = ?', (user_id,))
+        cursor.execute('SELECT status FROM current_status WHERE user_id = ?', (user_id,))
         result = cursor.fetchone()
         conn.close()
         
         return result[0] if result else 'OUT'
         
     except sqlite3.Error as e:
-        print(f"❌ Error fetching time status: {e}")
+        print(f"❌ Error fetching status: {e}")
         return 'OUT'
 
-def record_time_in(user_info):
-    """Record user time in (works for both students and staff)"""
+def record_time_in(user_info: Dict) -> bool:
+    """Record TIME IN for a user"""
     try:
-        conn = sqlite3.connect(TIME_TRACKING_DB)
+        conn = sqlite3.connect(MOTORPASS_DB)
         cursor = conn.cursor()
         
-        current_date = time.strftime('%Y-%m-%d')
-        current_time = time.strftime('%H:%M:%S')
-        
-        # Use unified_id for time tracking
         user_id = user_info.get('unified_id', user_info.get('student_id', ''))
+        user_name = user_info.get('name', user_info.get('full_name', ''))
         user_type = user_info.get('user_type', 'STUDENT')
+        current_date = datetime.now().strftime('%Y-%m-%d')
+        current_time = datetime.now().strftime('%H:%M:%S')
         
+        # Record in time_tracking
         cursor.execute('''
-            INSERT INTO time_records (student_id, student_name, user_type, date, time, status)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (user_id, user_info['name'], user_type, current_date, current_time, 'IN'))
+            INSERT INTO time_tracking (user_id, user_name, user_type, action, date, time)
+            VALUES (?, ?, ?, 'IN', ?, ?)
+        ''', (user_id, user_name, user_type, current_date, current_time))
         
+        # Update current_status
         cursor.execute('''
-            INSERT OR REPLACE INTO current_status (student_id, student_name, user_type, current_status)
-            VALUES (?, ?, ?, ?)
-        ''', (user_id, user_info['name'], user_type, 'IN'))
+            INSERT OR REPLACE INTO current_status (user_id, user_name, user_type, status)
+            VALUES (?, ?, ?, 'IN')
+        ''', (user_id, user_name, user_type))
         
         conn.commit()
         conn.close()
@@ -230,28 +215,29 @@ def record_time_in(user_info):
         print(f"❌ Error recording time in: {e}")
         return False
 
-def record_time_out(user_info):
-    """Record user time out (works for both students and staff)"""
+def record_time_out(user_info: Dict) -> bool:
+    """Record TIME OUT for a user"""
     try:
-        conn = sqlite3.connect(TIME_TRACKING_DB)
+        conn = sqlite3.connect(MOTORPASS_DB)
         cursor = conn.cursor()
         
-        current_date = time.strftime('%Y-%m-%d')
-        current_time = time.strftime('%H:%M:%S')
-        
-        # Use unified_id for time tracking
         user_id = user_info.get('unified_id', user_info.get('student_id', ''))
+        user_name = user_info.get('name', user_info.get('full_name', ''))
         user_type = user_info.get('user_type', 'STUDENT')
+        current_date = datetime.now().strftime('%Y-%m-%d')
+        current_time = datetime.now().strftime('%H:%M:%S')
         
+        # Record in time_tracking
         cursor.execute('''
-            INSERT INTO time_records (student_id, student_name, user_type, date, time, status)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (user_id, user_info['name'], user_type, current_date, current_time, 'OUT'))
+            INSERT INTO time_tracking (user_id, user_name, user_type, action, date, time)
+            VALUES (?, ?, ?, 'OUT', ?, ?)
+        ''', (user_id, user_name, user_type, current_date, current_time))
         
+        # Update current_status
         cursor.execute('''
-            INSERT OR REPLACE INTO current_status (student_id, student_name, user_type, current_status)
-            VALUES (?, ?, ?, ?)
-        ''', (user_id, user_info['name'], user_type, 'OUT'))
+            INSERT OR REPLACE INTO current_status (user_id, user_name, user_type, status)
+            VALUES (?, ?, ?, 'OUT')
+        ''', (user_id, user_name, user_type))
         
         conn.commit()
         conn.close()
@@ -261,7 +247,7 @@ def record_time_out(user_info):
         print(f"❌ Error recording time out: {e}")
         return False
 
-def record_time_attendance(user_info):
+def record_time_attendance(user_info: Dict) -> str:
     """Auto record time attendance based on current status"""
     user_id = user_info.get('unified_id', user_info.get('student_id', ''))
     current_status = get_student_time_status(user_id)
@@ -277,15 +263,15 @@ def record_time_attendance(user_info):
         else:
             return "❌ Failed to record TIME OUT"
 
-def get_all_time_records():
+def get_all_time_records() -> List[Dict]:
     """Get all time records"""
     try:
-        conn = sqlite3.connect(TIME_TRACKING_DB)
+        conn = sqlite3.connect(MOTORPASS_DB)
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT student_id, student_name, user_type, date, time, status, timestamp
-            FROM time_records
+            SELECT user_id, user_name, user_type, date, time, action, timestamp
+            FROM time_tracking
             ORDER BY timestamp DESC
         ''')
         
@@ -308,34 +294,17 @@ def get_all_time_records():
         print(f"❌ Error fetching time records: {e}")
         return []
 
-def clear_all_time_records():
-    """Clear all time records"""
+def get_students_currently_in() -> List[Dict]:
+    """Get all users currently inside"""
     try:
-        conn = sqlite3.connect(TIME_TRACKING_DB)
-        cursor = conn.cursor()
-        
-        cursor.execute('DELETE FROM time_records')
-        cursor.execute('DELETE FROM current_status')
-        
-        conn.commit()
-        conn.close()
-        return True
-        
-    except sqlite3.Error as e:
-        print(f"❌ Error clearing time records: {e}")
-        return False
-
-def get_students_currently_in():
-    """Get users currently timed in"""
-    try:
-        conn = sqlite3.connect(TIME_TRACKING_DB)
+        conn = sqlite3.connect(MOTORPASS_DB)
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT student_id, student_name, user_type, last_update
+            SELECT user_id, user_name, user_type, last_action_time
             FROM current_status
-            WHERE current_status = 'IN'
-            ORDER BY last_update DESC
+            WHERE status = 'IN'
+            ORDER BY last_action_time DESC
         ''')
         
         users = []
@@ -351,90 +320,94 @@ def get_students_currently_in():
         return users
         
     except sqlite3.Error as e:
-        print(f"❌ Error fetching users currently in: {e}")
+        print(f"❌ Error fetching users inside: {e}")
         return []
 
-# =================== SYSTEM MAINTENANCE ===================
+def clear_all_time_records() -> bool:
+    """Clear all time tracking records"""
+    try:
+        conn = sqlite3.connect(MOTORPASS_DB)
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM time_tracking')
+        cursor.execute('DELETE FROM current_status')
+        
+        conn.commit()
+        conn.close()
+        return True
+        
+    except sqlite3.Error as e:
+        print(f"❌ Error clearing time records: {e}")
+        return False
 
-def initialize_all_databases():
-    """Initialize all system databases"""
-    print("🗄️ Initializing databases...")
-    
-    time_db_ok = init_time_database()
-    student_db_ok = init_student_database()
-    
-    print(f"🗄️ Time Database: {'✅' if time_db_ok else '❌'}")
-    print(f"🗄️ Student/Staff Database: {'✅' if student_db_ok else '❌'}")
-    
-    return all([time_db_ok, student_db_ok])
+# =================== DATABASE STATISTICS ===================
 
-def get_database_stats():
+def get_database_stats() -> Dict:
     """Get database statistics"""
     try:
+        conn = sqlite3.connect(MOTORPASS_DB)
+        cursor = conn.cursor()
+        
         stats = {}
         
-        # Time records stats
-        conn = sqlite3.connect(TIME_TRACKING_DB)
-        cursor = conn.cursor()
+        # Count students
+        cursor.execute('SELECT COUNT(*) FROM students')
+        stats['total_students'] = stats['total_students_registered'] = cursor.fetchone()[0]
         
-        cursor.execute('SELECT COUNT(*) FROM time_records')
-        stats['total_time_records'] = cursor.fetchone()[0]
+        # Count staff
+        cursor.execute('SELECT COUNT(*) FROM staff')
+        stats['total_staff'] = stats['total_staff_registered'] = cursor.fetchone()[0]
         
-        cursor.execute("SELECT COUNT(*) FROM current_status WHERE current_status = 'IN'")
+        # Count currently inside
+        cursor.execute('SELECT COUNT(*) FROM current_status WHERE status = "IN"')
         stats['users_currently_in'] = cursor.fetchone()[0]
         
-        cursor.execute("SELECT COUNT(*) FROM current_status WHERE current_status = 'IN' AND user_type = 'STUDENT'")
+        # Breakdown by type
+        cursor.execute('SELECT COUNT(*) FROM current_status WHERE status = "IN" AND user_type = "STUDENT"')
         stats['students_currently_in'] = cursor.fetchone()[0]
         
-        cursor.execute("SELECT COUNT(*) FROM current_status WHERE current_status = 'IN' AND user_type = 'STAFF'")
+        cursor.execute('SELECT COUNT(*) FROM current_status WHERE status = "IN" AND user_type = "STAFF"')
         stats['staff_currently_in'] = cursor.fetchone()[0]
         
-        conn.close()
-        
-        # User database stats
-        conn = sqlite3.connect(STUDENT_DB_FILE)
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT COUNT(*) FROM students WHERE user_type = 'STUDENT'")
-        stats['total_students_registered'] = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM students WHERE user_type = 'STAFF'")
-        stats['total_staff_registered'] = cursor.fetchone()[0]
+        # Today's activity
+        today = datetime.now().strftime('%Y-%m-%d')
+        cursor.execute('SELECT COUNT(*) FROM time_tracking WHERE date = ?', (today,))
+        stats['todays_activity'] = cursor.fetchone()[0]
         
         conn.close()
-        
         return stats
         
     except sqlite3.Error as e:
-        print(f"❌ Error getting database stats: {e}")
+        print(f"❌ Error getting statistics: {e}")
         return {}
 
-def backup_databases(backup_dir="backups"):
-    """Create backup of all databases"""
+def backup_databases(backup_dir: str = "backups") -> bool:
+    """Create backup of the database"""
     try:
         import shutil
-        from datetime import datetime
         
         os.makedirs(backup_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = os.path.join(backup_dir, f"motorpass_{timestamp}.db")
         
-        backed_up = []
-        
-        # Backup time tracking database
-        if os.path.exists(TIME_TRACKING_DB):
-            backup_path = os.path.join(backup_dir, f"time_tracking_{timestamp}.db")
-            shutil.copy2(TIME_TRACKING_DB, backup_path)
-            backed_up.append("time_tracking.db")
-        
-        # Backup student database
-        if os.path.exists(STUDENT_DB_FILE):
-            backup_path = os.path.join(backup_dir, f"students_{timestamp}.db")
-            shutil.copy2(STUDENT_DB_FILE, backup_path)
-            backed_up.append("students.db")
-        
-        print(f"✅ Backed up databases: {', '.join(backed_up)}")
-        return True
-        
+        if os.path.exists(MOTORPASS_DB):
+            shutil.copy2(MOTORPASS_DB, backup_path)
+            print(f"✅ Database backed up to: {backup_path}")
+            return True
+        else:
+            print("❌ Database file not found")
+            return False
+            
     except Exception as e:
-        print(f"❌ Backup failed: {e}")
+        print(f"❌ Backup error: {e}")
         return False
+
+# =================== LEGACY COMPATIBILITY ===================
+
+def init_student_database():
+    """Legacy compatibility"""
+    return initialize_all_databases()
+
+def init_time_database():
+    """Legacy compatibility"""
+    return initialize_all_databases()

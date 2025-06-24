@@ -260,11 +260,6 @@ def find_best_line_match(input_name: str, ocr_lines: List[str]) -> Tuple[Optiona
         line_clean = line.strip()
         if not line_clean:
             continue
-        
-        # Skip short names (4 letters or less without spaces/punctuation)
-        name_letters_only = line_clean.replace(",", "").replace(".", "").replace(" ", "")
-        if len(name_letters_only) <= 4:
-            continue
             
         score = difflib.SequenceMatcher(None, input_name.lower(), line_clean.lower()).ratio()
         
@@ -370,37 +365,119 @@ def extract_guest_name_from_license(ocr_lines: List[str]) -> str:
         'ROAD', 'STREET', 'AVENUE', 'DISTRICT', 'CITY', 'PROVINCE', 'MARILAO', 'BULACAN',
         'BARANGAY', 'REPUBLIC', 'PHILIPPINES', 'TRANSPORTATION', 
         'DRIVER', 'LICENSE', 'NATIONALITY', 'ADDRESS', 'WEIGHT', 'HEIGHT',
-        'LN', 'FNMN'  
+        'LN', 'FNMN', 'LNFMMH'
     ]
     
-    potential_names = []
+    # Stop markers specific to Philippine licenses
+    stop_markers = [
+        'NATIONALITY', 'SEX', 'DATE OF BIRTH', 'WEIGHT', 'HEIGHT',
+        'ADDRESS', 'LICENSE NO', 'EXPIRATION DATE', 'AGENCY CODE',
+        'BLOOD TYPE', 'EYES COLOR', 'DL CODES', 'CONDITIONS',
+        'PHL', 'BLK', 'LOT', 'RESIDENCIA', 'SIGNATURE',
+        'M', 'F', 'BROWN', 'BLACK', 'BLUE', 'NONE',
+        'EN', 'ED', 'AC', 'YC', 'DLC', 'SI', 'S'
+    ]
     
-    for line in ocr_lines:
+    name_markers = ['LNFMMH', 'LNFMM', 'LN FN MN', 'LAST NAME', 'FIRST NAME', 'LN.FN.MN', 'LN.FN,MN']
+    
+    potential_names = []
+    name_marker_index = -1
+    
+    # First pass: find name markers (handle variations with dots/commas)
+    for i, line in enumerate(ocr_lines):
+        line_clean = line.strip().upper()
+        line_normalized = line_clean.replace(' ', '').replace('.', '').replace(',', '')
+        for marker in name_markers:
+            marker_normalized = marker.replace(' ', '').replace('.', '').replace(',', '')
+            if marker_normalized in line_normalized:
+                name_marker_index = i
+                break
+        if name_marker_index >= 0:
+            break
+    
+    # Second pass: extract names with stop marker awareness
+    for i, line in enumerate(ocr_lines):
         line_clean = line.strip().upper()
         
+        # If we found a name marker, prioritize the next line
+        if name_marker_index >= 0 and i == name_marker_index + 1:
+            if not any(char.isdigit() for char in line_clean) and len(line_clean) >= 5:
+                # Check if it's not a stop marker
+                if not any(marker in line_clean or line_clean == marker for marker in stop_markers):
+                    # Require exactly one comma for Philippine license format
+                    if line_clean.count(',') == 1:
+                        parts = line_clean.split(',')
+                        lastname = parts[0].strip()
+                        firstname = parts[1].strip()
+                        if (lastname.replace(' ', '').isalpha() and 
+                            firstname.replace(' ', '').isalpha() and
+                            len(lastname) >= 2 and len(firstname) >= 2 and
+                            len(lastname) <= 20 and len(firstname) <= 30):
+                            score = 100  # Highest score for lines after name markers
+                            potential_names.append((line_clean, score))
+                            # Don't continue looking past the name field
+                            break
+        
+        # Skip lines after we've passed the name field (if we found a marker)
+        if name_marker_index >= 0 and i > name_marker_index + 2:
+            # Check if we're now in other fields
+            if any(marker in line_clean for marker in stop_markers):
+                break
+        
         if (not line_clean or len(line_clean) < 5 or len(line_clean) > 50 or
-            any(keyword in line_clean for keyword in filter_keywords) or
             any(char.isdigit() for char in line_clean)):
             continue
         
-        # Check if it's alphabetic (with spaces and commas allowed)
-        if line_clean.replace(" ", "").replace(",", "").isalpha() and " " in line_clean:
-            # Additional check: ensure the actual name content (without punctuation) is long enough
-            name_content = line_clean.replace(",", "").replace(".", "").strip()
-            if len(name_content.replace(" ", "")) <= 4:  # Skip if 4 letters or less
-                continue
-            
-            # Check that each word has minimum length
-            words = name_content.split()
-            if any(len(word) < 2 for word in words):  # Skip if any word is less than 2 characters
-                continue
+        # Skip lines that ARE keywords or stop markers
+        if line_clean in filter_keywords or line_clean in stop_markers:
+            continue
+        
+        # Skip lines that start with keywords
+        skip_line = False
+        for keyword in filter_keywords + stop_markers:
+            if line_clean.startswith(keyword + ' '):
+                skip_line = True
+                break
+        
+        if skip_line:
+            continue
+        
+        # STRICT: Require exactly one comma
+        comma_count = line_clean.count(',')
+        if comma_count != 1:
+            continue
+        
+        # Score potential names
+        score = 0
+        
+        # Philippine license format: exactly one comma (LASTNAME,FIRSTNAME)
+        parts = line_clean.split(',')
+        lastname = parts[0].strip()
+        firstname = parts[1].strip()
+        if (lastname.replace(' ', '').isalpha() and 
+            firstname.replace(' ', '').isalpha() and
+            len(lastname) >= 2 and len(firstname) >= 2 and
+            len(lastname) <= 20 and len(firstname) <= 30):
+            # Check it's not an address
+            if not any(addr_marker in line_clean for addr_marker in ['BLK', 'LOT', 'PH', 'PHASE']):
+                score += 20  # Base score for proper format
                 
-            score = 0
-            if "," in line_clean: score += 10  # Last, First format
-            word_count = len(line_clean.split())
-            if 2 <= word_count <= 4: score += 5
-            if 10 <= len(line_clean) <= 30: score += 3
-            potential_names.append((line_clean, score))
+                # Length scoring
+                if 10 <= len(line_clean) <= 30: 
+                    score += 3
+                
+                # Proximity to name marker
+                if name_marker_index >= 0:
+                    distance = abs(i - name_marker_index - 1)
+                    if distance == 0:
+                        score += 50  # Right after marker
+                    elif distance == 1:
+                        score += 20  # One line away
+                    elif distance > 3:
+                        score -= 10  # Too far from marker
+                
+                if score > 0:
+                    potential_names.append((line_clean, score))
     
     if potential_names:
         potential_names.sort(key=lambda x: x[1], reverse=True)
@@ -408,26 +485,14 @@ def extract_guest_name_from_license(ocr_lines: List[str]) -> str:
         return _format_extracted_name_simple(best_name)
     
     return "Guest"
-
+          
 def _format_extracted_name_simple(name: str) -> str:
-    # First check if the name has enough actual letters
-    name_letters_only = name.replace(",", "").replace(".", "").replace(" ", "")
-    if len(name_letters_only) <= 4:  # Reject names with 4 letters or less
-        return "Guest"
-    
     if ',' in name:
         parts = name.split(',')
         if len(parts) == 2:
             last_name = parts[0].strip().title()
             first_part = parts[1].strip().title()
-            # Final check after formatting
-            if len(last_name.replace(" ", "")) + len(first_part.replace(" ", "")) <= 4:
-                return "Guest"
             return f"{first_part} {last_name}"
-    
-    # Final check for non-comma names
-    if len(name.replace(" ", "")) <= 4:
-        return "Guest"
     
     return name.title()
 
@@ -443,46 +508,133 @@ def _detect_name_pattern(raw_text: str) -> Optional[str]:
         'EYES COLOR', 'WEIGHT', 'HEIGHT', 'BLOOD TYPE', 'RESTRICTION',
         'SIGNATURE', 'PHOTO', 'FIRST NAME', 'LAST NAME', 'MIDDLE NAME',
         'CITY', 'PROVINCE', 'BARANGAY', 'STREET', 'ROAD', 'AVENUE',
-        'LN', 'FNMN', 'RESIDENCIA', 'BLK', 'LOT'  # Added new keywords
+        'RESIDENCIA', 'BLK', 'LOT'
     ]
     
-    for line in lines:
+    # Stop markers - if we see these after finding a name, stop looking
+    stop_markers = [
+        'NATIONALITY', 'SEX', 'DATE OF BIRTH', 'WEIGHT', 'HEIGHT',
+        'ADDRESS', 'LICENSE NO', 'EXPIRATION DATE', 'AGENCY CODE',
+        'BLOOD TYPE', 'EYES COLOR', 'DL CODES', 'CONDITIONS',
+        'SIGNATURE', 'PHL', 'BLK', 'LOT', 'RESIDENCIA',
+        # Also stop if we see patterns like these
+        'M', 'F',  # Sex indicators
+        'BROWN', 'BLACK', 'BLUE',  # Eye colors
+        'A', 'B', 'O', 'AB',  # Blood types
+        'NONE', 'A1', 'A', 'B', 'B1', 'B2',  # DL codes/conditions
+        # Additional stop patterns
+        'EN', 'ED', 'AC', 'YC', 'DLC', 'SI', 'S'  # Common abbreviations on licenses
+    ]
+    
+    # Name field markers
+    name_markers = ['LNFMMH', 'LNFMM', 'LN FN MN', 'LAST NAME', 'FIRST NAME', 'MIDDLE NAME', 'LN.FN.MN', 'LN.FN,MN']
+    
+    # Special handling for lines immediately after name markers
+    name_found = None
+    for i, line in enumerate(lines):
         line_upper = line.upper().strip()
         
-        # Skip empty or very short lines
-        if len(line_upper) < 5:
-            continue
+        # If we already found a name and encounter a stop marker, return the name
+        if name_found:
+            # Check if current line contains stop markers
+            for marker in stop_markers:
+                if marker in line_upper or line_upper == marker:
+                    return name_found
             
-        # Skip lines with numbers (license numbers, dates, etc.)
-        if any(char.isdigit() for char in line_upper):
-            continue
+            # Check if line contains date pattern (YYYY/MM/DD or similar)
+            if re.search(r'\d{4}[/-]\d{2}[/-]\d{2}|\d{2}[/-]\d{2}[/-]\d{4}', line_upper):
+                return name_found
             
-        # Skip lines containing any filter keywords
-        if any(keyword in line_upper for keyword in filter_keywords):
+            # Check if line contains only numbers (weight, height, etc)
+            if re.match(r'^[\d\s\.]+$', line_upper):
+                return name_found
+        
+        # Check if this line contains name field markers
+        marker_found = False
+        for marker in name_markers:
+            if marker in line_upper.replace(' ', '').replace('.', '').replace(',', ''):
+                marker_found = True
+                break
+        
+        if marker_found:
+            # The next line is likely the name
+            if i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                next_line_upper = next_line.upper()
+                
+                # Skip if next line is a stop marker
+                if any(marker in next_line_upper or next_line_upper == marker for marker in stop_markers):
+                    continue
+                
+                # Check if it looks like a name with exactly one comma
+                if not any(char.isdigit() for char in next_line) and len(next_line) >= 5:
+                    clean_name = re.sub(r"[^A-Z\s,]", "", next_line_upper).strip()
+                    comma_count = clean_name.count(',')
+                    
+                    # STRICT: Must have exactly one comma
+                    if comma_count == 1 and len(clean_name) >= 5:
+                        parts = clean_name.split(',')
+                        lastname = parts[0].strip()
+                        firstname = parts[1].strip()
+                        # Both parts should exist and be alphabetic
+                        if (lastname and firstname and
+                            lastname.replace(' ', '').isalpha() and 
+                            firstname.replace(' ', '').isalpha() and
+                            len(lastname) >= 2 and len(firstname) >= 2 and
+                            len(lastname) <= 20 and len(firstname) <= 30):
+                            name_found = clean_name.title()
+                            continue  # Continue to check for stop markers
             continue
+        
+        # Skip if we haven't found name markers yet
+        if not name_found:
+            # Skip empty or very short lines
+            if len(line_upper) < 5:
+                continue
+                
+            # Skip lines with numbers
+            if any(char.isdigit() for char in line_upper):
+                continue
+                
+            # Skip lines containing filter keywords ONLY if they're exact matches
+            skip_line = False
+            for keyword in filter_keywords:
+                if line_upper == keyword or line_upper.startswith(keyword + ' '):
+                    skip_line = True
+                    break
             
-        # Clean the line for final check
-        clean = re.sub(r"[^A-Z\s,]", "", line_upper).strip()
-        
-        # Additional check: ensure the actual name content (without punctuation) is long enough
-        name_content = clean.replace(",", "").replace(".", "").strip()
-        if len(name_content.replace(" ", "")) <= 4:  # Skip if 4 letters or less
-            continue
-        
-        # Check that each word has minimum length
-        words = name_content.split()
-        if any(len(word) < 2 for word in words):  # Skip if any word is less than 2 characters
-            continue
-        
-        # Check if it looks like a name
-        if (5 <= len(clean) <= 50 and 
-            clean.replace(" ", "").replace(",", "").isalpha() and 
-            " " in clean and 
-            len(clean.split()) >= 2):
-            return clean.title()  # Return in proper case
+            if skip_line:
+                continue
+            
+            # Skip lines that are stop markers
+            if line_upper in stop_markers or any(line_upper == marker for marker in stop_markers):
+                continue
+                
+            # Clean the line for final check
+            clean = re.sub(r"[^A-Z\s,]", "", line_upper).strip()
+            
+            # STRICT CHECK: Must have exactly one comma for Philippine license format
+            comma_count = clean.count(',')
+            if comma_count != 1:
+                continue  # Skip if not exactly one comma
+            
+            # Validate the name format
+            if len(clean) >= 5 and len(clean) <= 50:
+                parts = clean.split(',')
+                lastname = parts[0].strip()
+                firstname = parts[1].strip()
+                
+                # Both parts should be alphabetic and have minimum length
+                if (lastname.replace(' ', '').isalpha() and 
+                    firstname.replace(' ', '').isalpha() and
+                    len(lastname) >= 2 and len(firstname) >= 2 and
+                    len(lastname) <= 20 and len(firstname) <= 30):
+                    # Additional check: make sure it doesn't look like an address
+                    if not any(addr_marker in clean for addr_marker in ['BLK', 'LOT', 'PH', 'PHASE']):
+                        name_found = clean.title()
     
-    return None
-
+    return name_found
+          
 def package_name_info(structured_data: Dict[str, str], basic_text: str, fingerprint_info: Optional[dict] = None) -> NameInfo:
     return NameInfo(
         document_type="Driver's License",
