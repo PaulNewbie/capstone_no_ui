@@ -45,7 +45,13 @@
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h5 class="mb-0">Time Records</h5>
                 <div>
-                    <span class="text-muted">Total Records: <span id="record-count">0</span></span>
+                    <span class="text-muted me-3">Total Records: <span id="record-count">0</span></span>
+                    <button class="btn btn-outline-secondary btn-sm me-2" onclick="exportTimeRecords()">
+                        <i class="fas fa-download"></i> Export
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="printTimeRecords()">
+                        <i class="fas fa-print"></i> Print
+                    </button>
                 </div>
             </div>
             
@@ -158,6 +164,77 @@ function displayRecords(records) {
             `;
             tbody.append(row);
         });
+    }
+}
+
+// Print time records
+function printTimeRecords() {
+    window.print();
+}
+
+// Export time records to CSV
+function exportTimeRecords() {
+    const table = document.getElementById('records-table');
+    if (!table || table.style.display === 'none') {
+        alert('No records to export. Please load some data first.');
+        return;
+    }
+    
+    // Get filter info for filename
+    const dateFrom = $('#date-from').val();
+    const dateTo = $('#date-to').val();
+    const personType = $('#person-type').val() || 'All';
+    
+    // Create CSV content
+    let csvContent = 'Date,Time,ID,Name,Type,Action\n';
+    
+    // Get all table rows
+    const rows = table.querySelectorAll('tbody tr');
+    rows.forEach(function(row) {
+        const cells = row.querySelectorAll('td');
+        const rowData = [];
+        
+        cells.forEach(function(cell, index) {
+            let cellText = cell.textContent.trim();
+            // Remove extra whitespace and clean up badge text
+            cellText = cellText.replace(/\s+/g, ' ');
+            // Escape commas and quotes for CSV
+            if (cellText.includes(',') || cellText.includes('"')) {
+                cellText = '"' + cellText.replace(/"/g, '""') + '"';
+            }
+            rowData.push(cellText);
+        });
+        
+        csvContent += rowData.join(',') + '\n';
+    });
+    
+    // Create and download file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    
+    if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        
+        // Create filename with date range
+        let filename = 'motorpass_time_records';
+        if (dateFrom && dateTo) {
+            if (dateFrom === dateTo) {
+                filename += '_' + dateFrom;
+            } else {
+                filename += '_' + dateFrom + '_to_' + dateTo;
+            }
+        }
+        if (personType !== 'All') {
+            filename += '_' + personType.toLowerCase();
+        }
+        filename += '_' + new Date().getTime() + '.csv';
+        
+        link.setAttribute('download', filename);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }
 }
 </script>
