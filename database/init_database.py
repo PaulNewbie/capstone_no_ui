@@ -112,9 +112,6 @@ def initialize_all_databases():
         conn.commit()
         conn.close()
         
-        # Backup Database
-        backup_databases()
-        
         print("✅ MotorPass database initialized successfully")
         return True
         
@@ -125,26 +122,6 @@ def initialize_all_databases():
 
 # =================== BACKUP AND MAINTENANCE ===================
 
-def backup_databases(backup_dir: str = "backups") -> bool:
-    """Create backup of the database"""
-    try:
-        import shutil
-        
-        os.makedirs(backup_dir, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = os.path.join(backup_dir, f"motorpass_{timestamp}.db")
-        
-        if os.path.exists(MOTORPASS_DB):
-            shutil.copy2(MOTORPASS_DB, backup_path)
-            print(f"✅ Database backed up to: {backup_path}")
-            return True
-        else:
-            print("❌ Database file not found")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Backup error: {e}")
-        return False
 
 def verify_database_integrity() -> bool:
     """Verify database integrity"""

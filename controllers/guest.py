@@ -1,11 +1,11 @@
-# controllers/guest.py - Updated with GUI Integration (Hybrid Approach)
+# controllers/guest.py - Fixed with proper camera cleanup
 
 from services.license_reader import *
 from services.helmet_infer import verify_helmet
 from services.time_tracker import *
 from services.led_control import *  
 from services.buzzer_control import *
-from services.rpi_camera import ensure_camera_cleanup
+from services.rpi_camera import force_camera_cleanup
 from utils.display_helpers import display_separator, display_verification_result
 from utils.gui_helpers import show_results_gui, get_guest_info_gui, updated_guest_office_gui
 import difflib
@@ -28,15 +28,15 @@ def guest_verification():
     # Import GUI here to avoid circular imports
     from ui.guest_gui import GuestVerificationGUI
     
-    # Clean up camera before starting
-    ensure_camera_cleanup()
+    # Force cleanup before starting
+    force_camera_cleanup()
     
     # Create and run GUI
     gui = GuestVerificationGUI(run_guest_verification_with_gui)
     gui.run()
     
-    # Ensure cleanup after GUI closes
-    ensure_camera_cleanup()
+    # Final cleanup after GUI closes
+    force_camera_cleanup()
 
 def run_guest_verification_with_gui(status_callback):
     """Run guest verification steps with GUI status updates"""
@@ -55,6 +55,9 @@ def run_guest_verification_with_gui(status_callback):
         print("🪖 HELMET VERIFICATION (Terminal Camera)")
         print("="*60)
         
+        # Ensure camera is clean before helmet check
+        force_camera_cleanup()
+        
         if verify_helmet():
             status_callback({'helmet_status': 'VERIFIED'})
             status_callback({'current_step': '✅ Helmet verified successfully!'})
@@ -65,8 +68,12 @@ def run_guest_verification_with_gui(status_callback):
             set_led_idle()
             play_failure()
             cleanup_buzzer()
-            ensure_camera_cleanup()
+            force_camera_cleanup()
             return {'verified': False, 'reason': 'Helmet verification failed'}
+        
+        # Ensure camera is cleaned up after helmet check
+        force_camera_cleanup()
+        time.sleep(0.5)  # Brief pause to ensure cleanup
         
         # Step 2: License capture
         status_callback({'current_step': '📄 Capturing license... (Check terminal for camera)'})
@@ -76,6 +83,10 @@ def run_guest_verification_with_gui(status_callback):
         print("📄 LICENSE CAPTURE (Terminal Camera)")
         print("="*60)
         
+        # Force cleanup before license capture
+        force_camera_cleanup()
+        time.sleep(0.5)  # Brief pause
+        
         image_path = auto_capture_license_rpi()
         
         if not image_path:
@@ -84,7 +95,7 @@ def run_guest_verification_with_gui(status_callback):
             set_led_idle()
             play_failure()
             cleanup_buzzer()
-            ensure_camera_cleanup()
+            force_camera_cleanup()
             return {'verified': False, 'reason': 'License capture failed'}
         
         status_callback({'license_status': 'DETECTED'})
@@ -165,7 +176,7 @@ def run_guest_verification_with_gui(status_callback):
                 set_led_idle()
                 play_failure()
                 cleanup_buzzer()
-                ensure_camera_cleanup()
+                force_camera_cleanup()
                 return {'verified': False, 'reason': 'Guest registration cancelled'}
             
             existing_guest_info = {
@@ -243,7 +254,7 @@ def run_guest_verification_with_gui(status_callback):
                 set_led_idle()
                 play_failure()
                 cleanup_buzzer()
-                ensure_camera_cleanup()
+                force_camera_cleanup()
                 return {'verified': False, 'reason': 'Guest registration cancelled'}
             
             # Update guest info display
@@ -307,7 +318,7 @@ def run_guest_verification_with_gui(status_callback):
                 result = {'verified': False, 'reason': 'License verification failed'}
         
         cleanup_buzzer()
-        ensure_camera_cleanup()
+        force_camera_cleanup()
         return result
         
     except Exception as e:
@@ -315,7 +326,7 @@ def run_guest_verification_with_gui(status_callback):
         set_led_idle()
         play_failure()
         cleanup_buzzer()
-        ensure_camera_cleanup()
+        force_camera_cleanup()
         return {'verified': False, 'reason': str(e)}
 
 def store_guest_in_database(guest_info):

@@ -7,7 +7,7 @@ import hashlib
 import secrets
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
-from database.init_database import MOTORPASS_DB, initialize_all_databases, backup_databases, get_database_stats
+from database.init_database import MOTORPASS_DB, initialize_all_databases, get_database_stats
 
 # =================== STUDENT OPERATIONS ===================
 

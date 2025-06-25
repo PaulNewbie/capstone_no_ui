@@ -1,11 +1,11 @@
-# controllers/student.py - Updated with GUI Integration (Hybrid Approach)
+# controllers/student.py - Fixed with proper camera cleanup
 
 from services.fingerprint import authenticate_fingerprint
 from services.license_reader import *
 from services.helmet_infer import verify_helmet
 from services.led_control import *
 from services.buzzer_control import *
-from services.rpi_camera import ensure_camera_cleanup
+from services.rpi_camera import force_camera_cleanup
 
 # Import database operations
 from database.db_operations import (
@@ -29,15 +29,15 @@ def student_verification():
     # Import GUI here to avoid circular imports
     from ui.student_gui import StudentVerificationGUI
     
-    # Clean up camera before starting
-    ensure_camera_cleanup()
+    # Force cleanup before starting
+    force_camera_cleanup()
     
     # Create and run GUI
     gui = StudentVerificationGUI(run_verification_with_gui)
     gui.run()
     
-    # Ensure cleanup after GUI closes
-    ensure_camera_cleanup()
+    # Final cleanup after GUI closes
+    force_camera_cleanup()
     
 def run_verification_with_gui(status_callback):
     """Run verification steps with GUI status updates"""
@@ -56,6 +56,9 @@ def run_verification_with_gui(status_callback):
         print("🪖 HELMET VERIFICATION (Terminal Camera)")
         print("="*60)
         
+        # Ensure camera is clean before helmet check
+        force_camera_cleanup()
+        
         if verify_helmet():
             status_callback({'helmet_status': 'VERIFIED'})
             status_callback({'current_step': '✅ Helmet verified successfully!'})
@@ -66,8 +69,12 @@ def run_verification_with_gui(status_callback):
             set_led_idle()
             play_failure()
             cleanup_buzzer()
-            ensure_camera_cleanup()
+            force_camera_cleanup()
             return {'verified': False, 'reason': 'Helmet verification failed'}
+        
+        # Ensure camera is cleaned up after helmet check
+        force_camera_cleanup()
+        time.sleep(0.5)  # Brief pause to ensure cleanup
         
         # Step 2: Fingerprint authentication
         status_callback({'current_step': '🔒 Place your finger on the sensor...'})
@@ -85,7 +92,6 @@ def run_verification_with_gui(status_callback):
             set_led_idle()
             play_failure()
             cleanup_buzzer()
-            ensure_camera_cleanup()
             return {'verified': False, 'reason': 'Fingerprint authentication failed'}
         
         status_callback({'fingerprint_status': 'VERIFIED'})
@@ -106,7 +112,6 @@ def run_verification_with_gui(status_callback):
                 set_led_idle()
                 play_failure()
                 cleanup_buzzer()
-                ensure_camera_cleanup()
                 return {'verified': False, 'reason': 'License has expired'}
             
             status_callback({'license_status': 'VALID'})
@@ -118,6 +123,10 @@ def run_verification_with_gui(status_callback):
             print("📄 LICENSE CAPTURE (Terminal Camera)")
             print("="*60)
             
+            # Force cleanup before license capture
+            force_camera_cleanup()
+            time.sleep(0.5)  # Brief pause
+            
             image_path = auto_capture_license_rpi(
                 reference_name=user_info['name'],
                 fingerprint_info=user_info
@@ -128,7 +137,7 @@ def run_verification_with_gui(status_callback):
                 set_led_idle()
                 play_failure()
                 cleanup_buzzer()
-                ensure_camera_cleanup()
+                force_camera_cleanup()
                 return {'verified': False, 'reason': 'License capture failed'}
             
             # Verify license
@@ -208,7 +217,7 @@ def run_verification_with_gui(status_callback):
                 result = {'verified': False, 'reason': 'Failed to record TIME OUT'}
         
         cleanup_buzzer()
-        ensure_camera_cleanup()
+        force_camera_cleanup()
         return result
         
     except Exception as e:
@@ -216,7 +225,7 @@ def run_verification_with_gui(status_callback):
         set_led_idle()
         play_failure()
         cleanup_buzzer()
-        ensure_camera_cleanup()
+        force_camera_cleanup()
         return {'verified': False, 'reason': str(e)}
 
 def check_license_expiration(student_info):

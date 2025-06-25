@@ -1,0 +1,619 @@
+{% extends "base.html" %}
+
+{% block title %}Reports - {{ system_name }}{% endblock %}
+
+{% block page_title %}System Reports{% endblock %}
+
+{% block content %}
+<!-- Report Filter Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="data-table">
+            <h5 class="mb-3">Generate Report</h5>
+            <form id="report-form" class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Report Type</label>
+                    <select class="form-select" id="report-type">
+                        <option value="daily">Daily Summary (All Types)</option>
+                        <option value="course">Student Course Statistics</option>
+                        <option value="staff">Staff Role Statistics</option>
+                        <option value="guest">Guest Office Statistics</option>
+                        <option value="weekly">Weekly Summary</option>
+                        <option value="monthly">Monthly Summary</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Date</label>
+                    <input type="date" class="form-control" id="report-date">
+                </div>
+                <div class="col-md-3" id="filter-container" style="display: none;">
+                    <label class="form-label" id="filter-label">Filter</label>
+                    <select class="form-select" id="filter-select">
+                        <option value="">All</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-chart-bar"></i> Generate Report
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Report Results -->
+<div class="row" id="report-results" style="display: none;">
+    <div class="col-12">
+        <div class="data-table">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0" id="report-title">Report Results</h5>
+                <div>
+                    <button class="btn btn-outline-secondary btn-sm me-2" onclick="exportReport()">
+                        <i class="fas fa-download"></i> Export
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="printReport()">
+                        <i class="fas fa-print"></i> Print
+                    </button>
+                </div>
+            </div>
+            
+            <div id="report-content">
+                <!-- Report content will be loaded here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Statistics Cards (for specific reports) -->
+<div class="row" id="stats-cards" style="display: none;">
+    <div class="col-12">
+        <h5 class="mb-3" id="stats-title">Statistics</h5>
+    </div>
+    <div id="stats-cards-container">
+        <!-- Statistics cards will be generated here -->
+    </div>
+</div>
+
+<!-- Loading Indicator -->
+<div class="loading" id="report-loading">
+    <i class="fas fa-spinner fa-spin"></i> Generating report...
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    // Set default date to today
+    $('#report-date').val(new Date().toISOString().split('T')[0]);
+    
+    // Handle report type change
+    $('#report-type').on('change', function() {
+        const reportType = $(this).val();
+        handleReportTypeChange(reportType);
+    });
+    
+    // Handle form submission
+    $('#report-form').on('submit', function(e) {
+        e.preventDefault();
+        generateReport();
+    });
+});
+
+function handleReportTypeChange(reportType) {
+    const filterContainer = $('#filter-container');
+    const filterLabel = $('#filter-label');
+    const filterSelect = $('#filter-select');
+    
+    // Reset filter
+    filterSelect.empty().append('<option value="">All</option>');
+    
+    if (reportType === 'course') {
+        filterLabel.text('Course (Optional)');
+        filterContainer.show();
+        loadCourses();
+    } else if (reportType === 'staff') {
+        filterLabel.text('Role (Optional)');
+        filterContainer.show();
+        loadStaffRoles();
+    } else {
+        filterContainer.hide();
+    }
+}
+
+function loadCourses() {
+    $.ajax({
+        url: '/api/courses',
+        method: 'GET',
+        success: function(data) {
+            if (data.success) {
+                const filterSelect = $('#filter-select');
+                filterSelect.empty().append('<option value="">All Courses</option>');
+                
+                data.courses.forEach(function(course) {
+                    filterSelect.append(`<option value="${course}">${course}</option>`);
+                });
+            }
+        }
+    });
+}
+
+function loadStaffRoles() {
+    $.ajax({
+        url: '/api/staff-roles',
+        method: 'GET',
+        success: function(data) {
+            if (data.success) {
+                const filterSelect = $('#filter-select');
+                filterSelect.empty().append('<option value="">All Roles</option>');
+                
+                data.roles.forEach(function(role) {
+                    filterSelect.append(`<option value="${role}">${role}</option>`);
+                });
+            }
+        }
+    });
+}
+
+function generateReport() {
+    const reportType = $('#report-type').val();
+    const reportDate = $('#report-date').val();
+    const filter = $('#filter-select').val();
+    
+    $('#report-loading').addClass('show');
+    $('#report-results').hide();
+    $('#stats-cards').hide();
+    
+    const params = {
+        type: reportType,
+        date: reportDate
+    };
+    
+    if (reportType === 'course' && filter) {
+        params.course = filter;
+    } else if (reportType === 'staff' && filter) {
+        params.role = filter;
+    }
+    
+    $.ajax({
+        url: '/api/generate-report',
+        method: 'GET',
+        data: params,
+        success: function(data) {
+            $('#report-loading').removeClass('show');
+            
+            if (data.success) {
+                displayReport(data.report, reportType);
+            } else {
+                alert('Failed to generate report: ' + (data.error || 'Unknown error'));
+            }
+        },
+        error: function() {
+            $('#report-loading').removeClass('show');
+            alert('Error generating report');
+        }
+    });
+}
+
+function displayReport(report, type) {
+    const title = getReportTitle(type, report);
+    $('#report-title').text(title);
+    
+    let content = '';
+    
+    switch(type) {
+        case 'daily':
+            content = generateDailyReport(report);
+            break;
+        case 'course':
+            content = generateCourseReport(report);
+            displayCourseCards(report.course_details || []);
+            break;
+        case 'staff':
+            content = generateStaffReport(report);
+            displayStaffCards(report.role_details || []);
+            break;
+        case 'guest':
+            content = generateGuestReport(report);
+            break;
+        case 'weekly':
+        case 'monthly':
+            content = generatePeriodReport(report, type);
+            break;
+    }
+    
+    $('#report-content').html(content);
+    $('#report-results').show();
+    
+    if (type === 'course' || type === 'staff') {
+        $('#stats-cards').show();
+        $('#stats-title').text(type === 'course' ? 'Course Statistics' : 'Staff Role Statistics');
+    }
+}
+
+function generateDailyReport(report) {
+    const totalIn = (report.students?.time_in || 0) + (report.staff?.time_in || 0) + (report.guests?.time_in || 0);
+    const totalOut = (report.students?.time_out || 0) + (report.staff?.time_out || 0) + (report.guests?.time_out || 0);
+    
+    return `
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <h6><i class="fas fa-user-graduate"></i> Student Activity</h6>
+                <table class="table table-sm">
+                    <tr><td>Time In:</td><td class="text-end">${report.students?.time_in || 0}</td></tr>
+                    <tr><td>Time Out:</td><td class="text-end">${report.students?.time_out || 0}</td></tr>
+                    <tr><td>Currently Inside:</td><td class="text-end"><strong>${report.students?.currently_inside || 0}</strong></td></tr>
+                </table>
+            </div>
+            <div class="col-md-4">
+                <h6><i class="fas fa-user-tie"></i> Staff Activity</h6>
+                <table class="table table-sm">
+                    <tr><td>Time In:</td><td class="text-end">${report.staff?.time_in || 0}</td></tr>
+                    <tr><td>Time Out:</td><td class="text-end">${report.staff?.time_out || 0}</td></tr>
+                    <tr><td>Currently Inside:</td><td class="text-end"><strong>${report.staff?.currently_inside || 0}</strong></td></tr>
+                </table>
+            </div>
+            <div class="col-md-4">
+                <h6><i class="fas fa-user-friends"></i> Guest Activity</h6>
+                <table class="table table-sm">
+                    <tr><td>Time In:</td><td class="text-end">${report.guests?.time_in || 0}</td></tr>
+                    <tr><td>Time Out:</td><td class="text-end">${report.guests?.time_out || 0}</td></tr>
+                    <tr><td>Currently Inside:</td><td class="text-end"><strong>${report.guests?.currently_inside || 0}</strong></td></tr>
+                </table>
+            </div>
+        </div>
+        <div class="alert alert-info">
+            <div class="row">
+                <div class="col-md-4">
+                    <strong>Total Time In:</strong> ${totalIn}
+                </div>
+                <div class="col-md-4">
+                    <strong>Total Time Out:</strong> ${totalOut}
+                </div>
+                <div class="col-md-4">
+                    <strong>Total Currently Inside:</strong> ${report.total_currently_inside || 0}
+                </div>
+            </div>
+            ${report.peak_hour ? `<div class="mt-2"><strong>Peak Hour:</strong> ${report.peak_hour}</div>` : ''}
+        </div>
+    `;
+}
+
+function generateCourseReport(report) {
+    const courses = report.course_details || [];
+    
+    if (courses.length === 0) {
+        return '<div class="alert alert-warning">No course data available for selected date.</div>';
+    }
+    
+    let table = `
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>Course</th>
+                    <th class="text-center">Total Students</th>
+                    <th class="text-center">Time In</th>
+                    <th class="text-center">Time Out</th>
+                    <th class="text-center">Currently Inside</th>
+                    <th class="text-center">% Inside</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    let totals = {students: 0, in: 0, out: 0, inside: 0};
+    
+    courses.forEach(function(course) {
+        const percentage = course.total_students > 0 ? 
+            Math.round((course.currently_inside / course.total_students) * 100) : 0;
+        
+        totals.students += course.total_students;
+        totals.in += course.time_in;
+        totals.out += course.time_out;
+        totals.inside += course.currently_inside;
+        
+        table += `
+            <tr>
+                <td><strong>${course.course_name}</strong></td>
+                <td class="text-center">${course.total_students}</td>
+                <td class="text-center">${course.time_in}</td>
+                <td class="text-center">${course.time_out}</td>
+                <td class="text-center">${course.currently_inside}</td>
+                <td class="text-center">
+                    <div class="progress" style="height: 20px;">
+                        <div class="progress-bar" style="width: ${percentage}%">${percentage}%</div>
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+    
+    table += `
+        </tbody>
+        <tfoot>
+            <tr class="table-secondary">
+                <th>TOTAL</th>
+                <th class="text-center">${totals.students}</th>
+                <th class="text-center">${totals.in}</th>
+                <th class="text-center">${totals.out}</th>
+                <th class="text-center">${totals.inside}</th>
+                <th class="text-center">-</th>
+            </tr>
+        </tfoot>
+    </table>`;
+    
+    return table;
+}
+
+function generateStaffReport(report) {
+    const roles = report.role_details || [];
+    
+    if (roles.length === 0) {
+        return '<div class="alert alert-warning">No staff data available for selected date.</div>';
+    }
+    
+    let table = `
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>Role</th>
+                    <th class="text-center">Total Staff</th>
+                    <th class="text-center">Time In</th>
+                    <th class="text-center">Time Out</th>
+                    <th class="text-center">Currently Inside</th>
+                    <th class="text-center">% Inside</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    let totals = {staff: 0, in: 0, out: 0, inside: 0};
+    
+    roles.forEach(function(role) {
+        const percentage = role.total_staff > 0 ? 
+            Math.round((role.currently_inside / role.total_staff) * 100) : 0;
+        
+        totals.staff += role.total_staff;
+        totals.in += role.time_in;
+        totals.out += role.time_out;
+        totals.inside += role.currently_inside;
+        
+        table += `
+            <tr>
+                <td><strong>${role.role_name}</strong></td>
+                <td class="text-center">${role.total_staff}</td>
+                <td class="text-center">${role.time_in}</td>
+                <td class="text-center">${role.time_out}</td>
+                <td class="text-center">${role.currently_inside}</td>
+                <td class="text-center">
+                    <div class="progress" style="height: 20px;">
+                        <div class="progress-bar bg-info" style="width: ${percentage}%">${percentage}%</div>
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+    
+    table += `
+        </tbody>
+        <tfoot>
+            <tr class="table-secondary">
+                <th>TOTAL</th>
+                <th class="text-center">${totals.staff}</th>
+                <th class="text-center">${totals.in}</th>
+                <th class="text-center">${totals.out}</th>
+                <th class="text-center">${totals.inside}</th>
+                <th class="text-center">-</th>
+            </tr>
+        </tfoot>
+    </table>`;
+    
+    return table;
+}
+
+function generateGuestReport(report) {
+    const offices = report.office_details || [];
+    
+    let content = `
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="alert alert-info">
+                    <h6>Today's Guest Summary</h6>
+                    <p class="mb-1"><strong>Unique Guests:</strong> ${report.unique_guests_today || 0}</p>
+                    <p class="mb-0"><strong>Total Visits:</strong> ${report.total_visits || 0}</p>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    if (offices.length > 0) {
+        content += `
+            <h6>Visits by Office</h6>
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Office</th>
+                        <th class="text-center">Unique Guests (All Time)</th>
+                        <th class="text-center">Visits Today</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        
+        offices.forEach(function(office) {
+            content += `
+                <tr>
+                    <td>${office.office_name}</td>
+                    <td class="text-center">${office.unique_guests}</td>
+                    <td class="text-center">${office.visits_today}</td>
+                </tr>
+            `;
+        });
+        
+        content += '</tbody></table>';
+    } else {
+        content += '<div class="alert alert-warning">No guest visits recorded for selected date.</div>';
+    }
+    
+    return content;
+}
+
+function generatePeriodReport(report, type) {
+    const byType = report.by_type || {};
+    
+    return `
+        <div class="row">
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon bg-primary text-white">
+                        <i class="fas fa-calendar"></i>
+                    </div>
+                    <h4>${report.total_activities || 0}</h4>
+                    <p>Total Activities</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon bg-success text-white">
+                        <i class="fas fa-user-graduate"></i>
+                    </div>
+                    <h4>${byType.STUDENT?.unique_users || 0}</h4>
+                    <p>Unique Students</p>
+                    <small class="text-muted">${byType.STUDENT?.activities || 0} activities</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon bg-info text-white">
+                        <i class="fas fa-user-tie"></i>
+                    </div>
+                    <h4>${byType.STAFF?.unique_users || 0}</h4>
+                    <p>Unique Staff</p>
+                    <small class="text-muted">${byType.STAFF?.activities || 0} activities</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon bg-warning text-white">
+                        <i class="fas fa-user-friends"></i>
+                    </div>
+                    <h4>${byType.GUEST?.unique_users || 0}</h4>
+                    <p>Unique Guests</p>
+                    <small class="text-muted">${byType.GUEST?.activities || 0} activities</small>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function displayCourseCards(courses) {
+    const container = $('#stats-cards-container');
+    container.empty();
+    
+    const row = $('<div class="row"></div>');
+    
+    courses.forEach(function(course) {
+        const percentage = course.total_students > 0 ? 
+            Math.round((course.currently_inside / course.total_students) * 100) : 0;
+        
+        const card = `
+            <div class="col-md-4 mb-3">
+                <div class="stat-card">
+                    <h6>${course.course_name}</h6>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Inside: ${course.currently_inside}</span>
+                        <span>Total: ${course.total_students}</span>
+                    </div>
+                    <div class="progress" style="height: 10px;">
+                        <div class="progress-bar" style="width: ${percentage}%"></div>
+                    </div>
+                    <small class="text-muted">${percentage}% inside campus</small>
+                </div>
+            </div>
+        `;
+        row.append(card);
+    });
+    
+    container.append(row);
+}
+
+function displayStaffCards(roles) {
+    const container = $('#stats-cards-container');
+    container.empty();
+    
+    const row = $('<div class="row"></div>');
+    
+    roles.forEach(function(role) {
+        const percentage = role.total_staff > 0 ? 
+            Math.round((role.currently_inside / role.total_staff) * 100) : 0;
+        
+        const card = `
+            <div class="col-md-4 mb-3">
+                <div class="stat-card">
+                    <h6>${role.role_name}</h6>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Inside: ${role.currently_inside}</span>
+                        <span>Total: ${role.total_staff}</span>
+                    </div>
+                    <div class="progress" style="height: 10px;">
+                        <div class="progress-bar bg-info" style="width: ${percentage}%"></div>
+                    </div>
+                    <small class="text-muted">${percentage}% inside campus</small>
+                </div>
+            </div>
+        `;
+        row.append(card);
+    });
+    
+    container.append(row);
+}
+
+function getReportTitle(type, report) {
+    const date = report.date || 'Unknown Date';
+    
+    switch(type) {
+        case 'daily': return `Daily Report - ${date}`;
+        case 'course': 
+            return report.course_filter ? 
+                `Course Report: ${report.course_filter} - ${date}` : 
+                `All Courses Report - ${date}`;
+        case 'staff':
+            return report.role_filter ?
+                `Staff Report: ${report.role_filter} - ${date}` :
+                `All Staff Roles Report - ${date}`;
+        case 'guest': return `Guest Report - ${date}`;
+        case 'weekly': return `Weekly Report - ${report.week || 'Unknown Week'}`;
+        case 'monthly': return `Monthly Report - ${report.month || 'Unknown Month'}`;
+        default: return 'Report';
+    }
+}
+
+function printReport() {
+    window.print();
+}
+
+function exportReport() {
+    // Simple CSV export
+    const reportTitle = $('#report-title').text();
+    const reportContent = $('#report-content').html();
+    
+    // Create a temporary div to extract text
+    const temp = $('<div>').html(reportContent);
+    temp.find('script').remove();
+    
+    const textContent = temp.text().replace(/\s+/g, ' ').trim();
+    
+    // Create download
+    const blob = new Blob([reportTitle + '\n\n' + textContent], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `motorpass_report_${new Date().getTime()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+}
+</script>
+{% endblock %}

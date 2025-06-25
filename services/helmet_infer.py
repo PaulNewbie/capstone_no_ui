@@ -1,10 +1,10 @@
-# services/helmet_infer.py - Updated for RPi Camera 3
+# services/helmet_infer.py - Fixed with proper camera cleanup
 
 import cv2
 import numpy as np
 import onnxruntime as ort
 import time
-from services.rpi_camera import get_camera
+from services.rpi_camera import get_camera, force_camera_cleanup, CameraContext
 
 # === Helmet Detection Config ===
 MODEL_PATH = "best.onnx"
@@ -72,181 +72,148 @@ def postprocess_helmet(predictions, scale, orig_size):
     return result
 
 def verify_helmet():
-    """Verify full-face helmet using RPi Camera 3"""
+    """Verify full-face helmet using RPi Camera with guaranteed cleanup"""
     if session is None:
         print("❌ Helmet detection model not loaded")
         return False
     
     print("\n🪖 === HELMET VERIFICATION REQUIRED ===")
     print("⚠️ Please wear your FULL-FACE helmet before proceeding")
-    print(f"📷 Using RPi Camera 3 for {HELMET_DETECTION_DURATION} seconds...")
+    print(f"📷 Using RPi Camera for {HELMET_DETECTION_DURATION} seconds...")
     print("📱 Press 'q' or ESC to cancel verification")
     
-    # Get camera instance
-    camera = get_camera()
-    if not camera.initialized:
-        print("❌ Failed to initialize RPi camera")
-        return False
+    # Force cleanup before starting
+    force_camera_cleanup()
     
-    detection_start = None
-    consecutive_detections = 0
-    required_consecutive = 5  # Require 5 consecutive detections for stability
-    
-    print("🔍 Helmet detection started... Please show your full-face helmet to the camera")
-    
-    # Create window
-    cv2.namedWindow("Helmet Verification", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Helmet Verification", 800, 600)
-    
-    frame_count = 0
-    last_frame_time = time.time()
+    result = False
     
     try:
-        while True:
-            current_time = time.time()
+        # Use context manager for guaranteed cleanup
+        with CameraContext() as camera:
+            if not camera.initialized:
+                print("❌ Failed to initialize RPi camera")
+                return False
             
-            # Get frame from RPi camera
-            frame = camera.get_frame()
+            detection_start = None
+            consecutive_detections = 0
+            required_consecutive = 5
             
-            if frame is None:
-                print("❌ Failed to capture frame from RPi camera")
-                # Show error message on a blank frame
-                error_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                cv2.putText(error_frame, "Camera Connection Failed", (150, 240),
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                cv2.putText(error_frame, "Check RPi camera connection", (120, 280),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                cv2.imshow("Helmet Verification", error_frame)
+            print("🔍 Helmet detection started... Please show your full-face helmet to the camera")
+            
+            # Create window
+            cv2.namedWindow("Helmet Verification", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("Helmet Verification", 800, 600)
+            
+            frame_count = 0
+            last_frame_time = time.time()
+            
+            while True:
+                current_time = time.time()
                 
-                key = cv2.waitKey(1000) & 0xFF  # Wait 1 second
-                if key == ord('q') or key == 27:
-                    break
-                continue
-            
-            frame_count += 1
-            
-            # Process frame for helmet detection
-            try:
-                blob, scale, orig_size = preprocess_helmet(frame)
-                predictions = session.run(None, {input_name: blob})[0]
-                detections = postprocess_helmet(predictions[0], scale, orig_size)
-            except Exception as e:
-                print(f"❌ Error in helmet detection: {e}")
-                detections = []
-            
-            full_face_detected = False
-            nutshell_detected = False
-            
-            # Check for helmets
-            for x1, y1, x2, y2, conf, cls_id in detections:
-                if cls_id == 1:  # full-face helmet
-                    full_face_detected = True
-                    label = f"Full-Face Helmet ({conf:.2f})"
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
-                    cv2.putText(frame, label, (x1, y1 - 10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                elif cls_id == 0:  # nutshell
-                    nutshell_detected = True
-                    label = f"Nutshell Helmet - NOT ALLOWED ({conf:.2f})"
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
-                    cv2.putText(frame, label, (x1, y1 - 10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-            
-            # Update detection logic
-            if full_face_detected and not nutshell_detected:
-                consecutive_detections += 1
+                # Get frame from RPi camera
+                frame = camera.get_frame()
                 
-                if detection_start is None and consecutive_detections >= required_consecutive:
-                    detection_start = current_time
-                    print("✅ Full-face helmet consistently detected! Starting timer...")
+                if frame is None:
+                    print("❌ Failed to capture frame from RPi camera")
+                    # Show error message
+                    error_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                    cv2.putText(error_frame, "Camera Connection Failed", (150, 240),
+                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                    cv2.imshow("Helmet Verification", error_frame)
+                    
+                    key = cv2.waitKey(1000) & 0xFF
+                    if key == ord('q') or key == 27:
+                        break
+                    continue
                 
-                if detection_start is not None:
-                    elapsed = current_time - detection_start
+                frame_count += 1
+                
+                # Process frame for helmet detection
+                try:
+                    blob, scale, orig_size = preprocess_helmet(frame)
+                    predictions = session.run(None, {input_name: blob})[0]
+                    detections = postprocess_helmet(predictions[0], scale, orig_size)
+                except Exception as e:
+                    print(f"❌ Error in helmet detection: {e}")
+                    detections = []
+                
+                full_face_detected = False
+                nutshell_detected = False
+                
+                # Check for helmets
+                for x1, y1, x2, y2, conf, cls_id in detections:
+                    if cls_id == 1:  # full-face helmet
+                        full_face_detected = True
+                        label = f"Full-Face Helmet ({conf:.2f})"
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
+                        cv2.putText(frame, label, (x1, y1 - 10),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                    elif cls_id == 0:  # nutshell
+                        nutshell_detected = True
+                        label = f"Nutshell Helmet - NOT ALLOWED ({conf:.2f})"
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+                        cv2.putText(frame, label, (x1, y1 - 10),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                
+                # Update detection logic
+                if full_face_detected and not nutshell_detected:
+                    consecutive_detections += 1
                     
-                    # Show countdown on frame
-                    progress_bar_width = 400
-                    progress_bar_height = 30
-                    progress_x = (frame.shape[1] - progress_bar_width) // 2
-                    progress_y = 50
+                    if detection_start is None and consecutive_detections >= required_consecutive:
+                        detection_start = current_time
+                        print("✅ Full-face helmet consistently detected! Starting timer...")
                     
-                    # Draw progress bar background
-                    cv2.rectangle(frame, (progress_x, progress_y), 
-                                 (progress_x + progress_bar_width, progress_y + progress_bar_height), 
-                                 (50, 50, 50), -1)
-                    
-                    # Draw progress
-                    progress_width = int((elapsed / HELMET_DETECTION_DURATION) * progress_bar_width)
-                    cv2.rectangle(frame, (progress_x, progress_y), 
-                                 (progress_x + progress_width, progress_y + progress_bar_height), 
-                                 (0, 255, 0), -1)
-                    
-                    # Progress text
-                    progress_text = f"Helmet Verified: {elapsed:.1f}/{HELMET_DETECTION_DURATION}s"
-                    text_size = cv2.getTextSize(progress_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-                    text_x = (frame.shape[1] - text_size[0]) // 2
-                    cv2.putText(frame, progress_text, (text_x, progress_y + 95),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                    
-                    print(f"⏱️ Helmet verified for {elapsed:.1f}/{HELMET_DETECTION_DURATION} seconds")
-                    
-                    if elapsed >= HELMET_DETECTION_DURATION:
-                        print("✅ Helmet verification successful!")
+                    if detection_start is not None:
+                        elapsed = current_time - detection_start
                         
-                        # Show success message for 2 seconds
-                        success_frame = frame.copy()
-                        cv2.rectangle(success_frame, (50, 200), (frame.shape[1] - 50, 350), (0, 255, 0), -1)
-                        cv2.putText(success_frame, "HELMET VERIFICATION", (text_x - 50, 250),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
-                        cv2.putText(success_frame, "SUCCESSFUL!", (text_x + 20, 300),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
-                        cv2.putText(success_frame, "Proceeding to fingerprint...", (text_x - 80, 330),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                        # Show countdown on frame
+                        progress_text = f"Helmet Verified: {elapsed:.1f}/{HELMET_DETECTION_DURATION}s"
+                        cv2.putText(frame, progress_text, (10, 30),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                         
-                        cv2.imshow("Helmet Verification", success_frame)
-                        cv2.waitKey(2000)  # Show success for 2 seconds
-                        
-                        cv2.destroyAllWindows()
-                        return True
-            else:
-                consecutive_detections = 0
-                if detection_start is not None:
-                    print("⚠️ Full-face helmet lost! Please keep helmet visible...")
-                detection_start = None
-                
-                # Show status on frame
-                if nutshell_detected:
-                    status_text = "NUTSHELL HELMET NOT ALLOWED"
-                    status_color = (0, 0, 255)
+                        if elapsed >= HELMET_DETECTION_DURATION:
+                            print("✅ Helmet verification successful!")
+                            result = True
+                            break
                 else:
-                    status_text = "Please wear FULL-FACE HELMET"
-                    status_color = (0, 165, 255)  # Orange
+                    consecutive_detections = 0
+                    if detection_start is not None:
+                        print("⚠️ Full-face helmet lost! Please keep helmet visible...")
+                    detection_start = None
+                    
+                    # Show status on frame
+                    if nutshell_detected:
+                        status_text = "NUTSHELL HELMET NOT ALLOWED"
+                        status_color = (0, 0, 255)
+                    else:
+                        status_text = "Please wear FULL-FACE HELMET"
+                        status_color = (0, 165, 255)
+                    
+                    cv2.putText(frame, status_text, (10, 40),
+                               cv2.FONT_HERSHEY_SIMPLEX, 1, status_color, 2)
                 
-                text_size = cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)[0]
-                text_x = (frame.shape[1] - text_size[0]) // 2
-                cv2.putText(frame, status_text, (text_x, 40),
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, status_color, 2)
-            
-            # Add frame info
-            fps = 1.0 / (current_time - last_frame_time) if (current_time - last_frame_time) > 0 else 0
-            last_frame_time = current_time
-            
-            cv2.putText(frame, f"Frame: {frame_count} | FPS: {fps:.1f}", (10, frame.shape[0] - 20),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            
-            # Instructions
-            cv2.putText(frame, "Press 'q' or ESC to cancel", (10, frame.shape[0] - 40),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-            
-            # Show frame
-            cv2.imshow("Helmet Verification", frame)
-            
-            # Check for user input
-            key = cv2.waitKey(30) & 0xFF  # 30ms delay for smoother video
-            if key == ord('q') or key == 27:  # 'q' or ESC
-                print("❌ Helmet verification cancelled by user")
-                break
+                # Show frame
+                cv2.imshow("Helmet Verification", frame)
+                
+                # Check for user input
+                key = cv2.waitKey(30) & 0xFF
+                if key == ord('q') or key == 27:
+                    print("❌ Helmet verification cancelled by user")
+                    break
+    
+    except Exception as e:
+        print(f"❌ Error during helmet verification: {e}")
     
     finally:
-        cv2.destroyAllWindows()
+        # Ensure cleanup happens no matter what
+        try:
+            cv2.destroyWindow("Helmet Verification")
+            cv2.destroyAllWindows()
+            cv2.waitKey(1)
+        except:
+            pass
     
-    return False
+    # Final cleanup after context manager
+    force_camera_cleanup()
+    
+    return result

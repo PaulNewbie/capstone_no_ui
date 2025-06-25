@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+
+{% block title %}Users - {{ system_name }}{% endblock %}
+
+{% block page_title %}User Management{% endblock %}
+
+{% block content %}
+<!-- Filter Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="data-table">
+            <h5 class="mb-3">Filter Users</h5>
+            <form id="filter-form" class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">User Type</label>
+                    <select class="form-select" id="user-type">
+                        <option value="all">All Users</option>
+                        <option value="student">Students Only</option>
+                        <option value="staff">Staff Only</option>
+                        <option value="guest">Guests Only</option>
+                    </select>
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label">Search</label>
+                    <input type="text" class="form-control" id="search-term" placeholder="Search by name or ID...">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-search"></i> Search
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- User Statistics -->
+<div class="row mb-4">
+    <div class="col-md-4">
+        <div class="stat-card primary">
+            <div class="stat-icon">
+                <i class="fas fa-user-graduate"></i>
+            </div>
+            <h3 id="total-students">0</h3>
+            <p>Total Students</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stat-card info">
+            <div class="stat-icon">
+                <i class="fas fa-user-tie"></i>
+            </div>
+            <h3 id="total-staff">0</h3>
+            <p>Total Staff</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stat-card warning">
+            <div class="stat-icon">
+                <i class="fas fa-user-friends"></i>
+            </div>
+            <h3 id="total-guests">0</h3>
+            <p>Total Guests</p>
+        </div>
+    </div>
+</div>
+
+<!-- Users Table -->
+<div class="row">
+    <div class="col-12">
+        <div class="data-table">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">Registered Users</h5>
+                <div>
+                    <span class="text-muted">Showing: <span id="shown-count">0</span> users</span>
+                </div>
+            </div>
+            
+            <div class="loading" id="users-loading">
+                <i class="fas fa-spinner fa-spin"></i> Loading users...
+            </div>
+            
+            <div class="table-responsive">
+                <table class="table table-hover" id="users-table" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Details</th>
+                            <th>Plate Number</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-tbody">
+                        <!-- Will be populated by JavaScript -->
+                    </tbody>
+                </table>
+                
+                <div id="no-users" style="display: none;" class="text-center py-4 text-muted">
+                    <i class="fas fa-info-circle"></i> No users found
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Load initial data
+$(document).ready(function() {
+    loadUsers();
+    loadStatistics();
+    
+    // Handle form submission
+    $('#filter-form').on('submit', function(e) {
+        e.preventDefault();
+        loadUsers();
+    });
+    
+    // Handle type change
+    $('#user-type').on('change', function() {
+        loadUsers();
+    });
+    
+    // Handle search with delay
+    let searchTimeout;
+    $('#search-term').on('keyup', function() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(function() {
+            loadUsers();
+        }, 300);
+    });
+});
+
+// Load user statistics
+function loadStatistics() {
+    $.ajax({
+        url: '/api/dashboard-data',
+        method: 'GET',
+        success: function(data) {
+            if (data.success) {
+                $('#total-students').text(data.summary.total_students || 0);
+                $('#total-staff').text(data.summary.total_staff || 0);
+                $('#total-guests').text(data.summary.total_guests || 0);
+            }
+        }
+    });
+}
+
+// Load users with filters
+function loadUsers() {
+    $('#users-loading').addClass('show');
+    $('#users-table').hide();
+    $('#no-users').hide();
+    
+    const params = {
+        type: $('#user-type').val(),
+        search: $('#search-term').val()
+    };
+    
+    $.ajax({
+        url: '/api/users',
+        method: 'GET',
+        data: params,
+        success: function(data) {
+            $('#users-loading').removeClass('show');
+            
+            if (data.success) {
+                displayUsers(data.users);
+                $('#shown-count').text(data.users.length);
+            }
+        },
+        error: function(xhr, status, error) {
+            $('#users-loading').removeClass('show');
+            console.error('Error loading users:', error);
+            alert('Error loading users. Please try again.');
+        }
+    });
+}
+
+// Display users in table
+function displayUsers(users) {
+    const tbody = $('#users-tbody');
+    tbody.empty();
+    
+    if (users.length === 0) {
+        $('#users-table').hide();
+        $('#no-users').show();
+    } else {
+        $('#users-table').show();
+        $('#no-users').hide();
+        
+        // Group users by type for better organization
+        const grouped = {
+            STUDENT: [],
+            STAFF: [],
+            GUEST: []
+        };
+        
+        users.forEach(function(user) {
+            if (grouped[user.type]) {
+                grouped[user.type].push(user);
+            }
+        });
+        
+        // Display each group
+        Object.keys(grouped).forEach(function(type) {
+            const typeUsers = grouped[type];
+            if (typeUsers.length > 0) {
+                // Add group header
+                tbody.append(`
+                    <tr class="table-secondary">
+                        <td colspan="5"><strong>${type}S (${typeUsers.length})</strong></td>
+                    </tr>
+                `);
+                
+                // Add users
+                typeUsers.forEach(function(user) {
+                    let typeClass = 'badge-secondary';
+                    let typeIcon = 'fa-user';
+                    
+                    if (user.type === 'STUDENT') {
+                        typeClass = 'badge-student';
+                        typeIcon = 'fa-user-graduate';
+                    } else if (user.type === 'STAFF') {
+                        typeClass = 'badge-info';
+                        typeIcon = 'fa-user-tie';
+                    } else if (user.type === 'GUEST') {
+                        typeClass = 'badge-guest';
+                        typeIcon = 'fa-user-friends';
+                    }
+                    
+                    const row = `
+                        <tr>
+                            <td>${user.id}</td>
+                            <td>${user.name}</td>
+                            <td>
+                                <span class="badge ${typeClass}">
+                                    <i class="fas ${typeIcon}"></i> ${user.type}
+                                </span>
+                            </td>
+                            <td>${user.details || 'N/A'}</td>
+                            <td>${user.plate || 'N/A'}</td>
+                        </tr>
+                    `;
+                    tbody.append(row);
+                });
+            }
+        });
+    }
+}
+</script>
+{% endblock %}
