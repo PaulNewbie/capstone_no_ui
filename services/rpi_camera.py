@@ -29,7 +29,12 @@ def get_camera():
     
     if _camera_lock:
         print("⚠️ Camera is locked by another process")
-        return None
+        # Return a dummy camera object instead of None
+        class DummyCamera:
+            initialized = False
+            def get_frame(self):
+                return None
+        return DummyCamera()
         
     _camera_lock = True
     

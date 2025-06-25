@@ -11,10 +11,10 @@ class GuestVerificationGUI:
     def __init__(self, verification_function):
         self.root = tk.Tk()
         self.verification_function = verification_function
+        self.verification_complete = False  # Initialize BEFORE other methods
         self.setup_window()
         self.create_variables()
         self.create_interface()
-        self.verification_complete = False
         
     def setup_window(self):
         """Setup the main window"""
@@ -47,11 +47,20 @@ class GuestVerificationGUI:
         
     def update_time(self):
         """Update time display"""
-        now = datetime.now()
-        self.time_string.set(now.strftime("%H:%M:%S"))
-        self.date_string.set(now.strftime("%A, %B %d, %Y"))
-        if not self.verification_complete:
-            self.root.after(1000, self.update_time)
+        try:
+            if not hasattr(self, 'root') or not self.root.winfo_exists():
+                return
+			    
+            now = datetime.now()
+            self.time_string.set(now.strftime("%H:%M:%S"))
+            self.date_string.set(now.strftime("%A, %B %d, %Y"))
+            if not self.verification_complete and self.root.winfo_exists():
+                self._update_timer = self.root.after(1000, self.update_time)
+        except tk.TclError:
+            pass
+        except Exception as e:
+            # Handle case where GUI is being destroyed
+            pass
     
     def create_interface(self):
         """Create the main interface"""
@@ -285,145 +294,158 @@ class GuestVerificationGUI:
     
     def show_guest_info(self, guest_info):
         """Display guest information"""
-        self.initial_message.pack_forget()
-        
-        # Clear previous details
-        for widget in self.guest_details_frame.winfo_children():
-            widget.destroy()
-        
-        # Create info labels
-        info_items = [
-            ("Name:", guest_info.get('name', 'Guest')),
-            ("Plate Number:", guest_info.get('plate_number', 'N/A')),
-            ("Office Visiting:", guest_info.get('office', 'N/A')),
-            ("Status:", guest_info.get('status', 'NEW GUEST'))
-        ]
-        
-        # Add guest number if returning guest
-        if 'guest_number' in guest_info:
-            info_items.insert(1, ("Guest No:", guest_info.get('guest_number', 'N/A')))
-        
-        for label, value in info_items:
-            row = tk.Frame(self.guest_details_frame, bg='#e8f5e9')
-            row.pack(fill="x", pady=3)
+        try:
+            self.initial_message.pack_forget()
             
-            tk.Label(row, text=label, font=("Arial", 12, "bold"), 
-                    fg="#333333", bg='#e8f5e9', width=15, anchor="w").pack(side="left")
-            tk.Label(row, text=value, font=("Arial", 12), 
-                    fg="#2e7d32", bg='#e8f5e9').pack(side="left", padx=(10, 0))
-        
-        self.guest_info_panel.pack(fill="x", pady=10)
+            # Clear previous details
+            for widget in self.guest_details_frame.winfo_children():
+                widget.destroy()
+            
+            # Create info labels
+            info_items = [
+                ("Name:", guest_info.get('name', 'Guest')),
+                ("Plate Number:", guest_info.get('plate_number', 'N/A')),
+                ("Office Visiting:", guest_info.get('office', 'N/A')),
+                ("Status:", guest_info.get('status', 'NEW GUEST'))
+            ]
+            
+            # Add guest number if returning guest
+            if 'guest_number' in guest_info:
+                info_items.insert(1, ("Guest No:", guest_info.get('guest_number', 'N/A')))
+            
+            for label, value in info_items:
+                row = tk.Frame(self.guest_details_frame, bg='#e8f5e9')
+                row.pack(fill="x", pady=3)
+                
+                tk.Label(row, text=label, font=("Arial", 12, "bold"), 
+                        fg="#333333", bg='#e8f5e9', width=15, anchor="w").pack(side="left")
+                tk.Label(row, text=value, font=("Arial", 12), 
+                        fg="#2e7d32", bg='#e8f5e9').pack(side="left", padx=(10, 0))
+            
+            self.guest_info_panel.pack(fill="x", pady=10)
+        except Exception as e:
+            print(f"Error showing guest info: {e}")
     
     def show_verification_summary(self, results):
         """Display verification summary"""
-        # Clear previous summary
-        for widget in self.summary_frame.winfo_children():
-            widget.destroy()
-        
-        # Create summary items
-        checks = [
-            ("Helmet Verification", results.get('helmet', False)),
-            ("License Detection", results.get('license', False))
-        ]
-        
-        for check_name, passed in checks:
-            row = tk.Frame(self.summary_frame, bg='#f5f5f5')
-            row.pack(fill="x", pady=5)
+        try:
+            # Clear previous summary
+            for widget in self.summary_frame.winfo_children():
+                widget.destroy()
             
-            # Icon
-            icon = "✅" if passed else "❌"
-            color = "#28a745" if passed else "#dc3545"
+            # Create summary items
+            checks = [
+                ("Helmet Verification", results.get('helmet', False)),
+                ("License Detection", results.get('license', False))
+            ]
             
-            tk.Label(row, text=icon, font=("Arial", 16), 
-                    fg=color, bg='#f5f5f5').pack(side="left")
+            for check_name, passed in checks:
+                row = tk.Frame(self.summary_frame, bg='#f5f5f5')
+                row.pack(fill="x", pady=5)
+                
+                # Icon
+                icon = "✅" if passed else "❌"
+                color = "#28a745" if passed else "#dc3545"
+                
+                tk.Label(row, text=icon, font=("Arial", 16), 
+                        fg=color, bg='#f5f5f5').pack(side="left")
+                
+                tk.Label(row, text=check_name, font=("Arial", 12), 
+                        fg="#333333", bg='#f5f5f5').pack(side="left", padx=(10, 0))
+                
+                status_text = "PASSED" if passed else "FAILED"
+                tk.Label(row, text=f"[{status_text}]", font=("Arial", 11, "bold"), 
+                        fg=color, bg='#f5f5f5').pack(side="right")
             
-            tk.Label(row, text=check_name, font=("Arial", 12), 
-                    fg="#333333", bg='#f5f5f5').pack(side="left", padx=(10, 0))
-            
-            status_text = "PASSED" if passed else "FAILED"
-            tk.Label(row, text=f"[{status_text}]", font=("Arial", 11, "bold"), 
-                    fg=color, bg='#f5f5f5').pack(side="right")
-        
-        self.summary_panel.pack(fill="x", pady=10)
+            self.summary_panel.pack(fill="x", pady=10)
+        except Exception as e:
+            print(f"Error showing verification summary: {e}")
     
     def show_final_result(self, result):
         """Show final verification result"""
-        self.verification_complete = True
-        
-        # Create overlay
-        overlay = tk.Frame(self.root, bg='rgba(0,0,0,0.7)')
-        overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
-        
-        # Result box
-        result_box = tk.Frame(overlay, bg='white', relief='solid', bd=3)
-        result_box.place(relx=0.5, rely=0.5, anchor='center')
-        
-        # Content
-        content = tk.Frame(result_box, bg='white')
-        content.pack(padx=60, pady=40)
-        
-        if result.get('verified', False):
-            # Success
-            icon_label = tk.Label(content, text="✅", font=("Arial", 60), bg='white')
-            icon_label.pack()
+        try:
+            self.verification_complete = True
             
-            title = tk.Label(content, text="GUEST ACCESS GRANTED", 
-                           font=("Arial", 28, "bold"), fg="#28a745", bg='white')
-            title.pack(pady=(20, 10))
+            # Create overlay
+            overlay = tk.Frame(self.root, bg='#333333')
+            overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
             
-            name = result.get('name', 'Guest')
-            welcome = tk.Label(content, text=f"Welcome, {name}!", 
-                             font=("Arial", 18), fg="#333333", bg='white')
-            welcome.pack(pady=10)
+            # Result box
+            result_box = tk.Frame(overlay, bg='white', relief='solid', bd=3)
+            result_box.place(relx=0.5, rely=0.5, anchor='center')
             
-            # Time status
-            time_action = result.get('time_action', 'IN')
-            time_color = "#28a745" if time_action == 'IN' else "#dc3545"
-            time_text = f"TIME {time_action} recorded at {result.get('timestamp', 'now')}"
+            # Content
+            content = tk.Frame(result_box, bg='white')
+            content.pack(padx=60, pady=40)
             
-            time_label = tk.Label(content, text=time_text, 
-                                font=("Arial", 16, "bold"), fg=time_color, bg='white')
-            time_label.pack(pady=10)
+            if result.get('verified', False):
+                # Success
+                icon_label = tk.Label(content, text="✅", font=("Arial", 60), bg='white')
+                icon_label.pack()
+                
+                title = tk.Label(content, text="GUEST ACCESS GRANTED", 
+                               font=("Arial", 28, "bold"), fg="#28a745", bg='white')
+                title.pack(pady=(20, 10))
+                
+                name = result.get('name', 'Guest')
+                welcome = tk.Label(content, text=f"Welcome, {name}!", 
+                                 font=("Arial", 18), fg="#333333", bg='white')
+                welcome.pack(pady=10)
+                
+                # Time status
+                time_action = result.get('time_action', 'IN')
+                time_color = "#28a745" if time_action == 'IN' else "#dc3545"
+                time_text = f"TIME {time_action} recorded at {result.get('timestamp', 'now')}"
+                
+                time_label = tk.Label(content, text=time_text, 
+                                    font=("Arial", 16, "bold"), fg=time_color, bg='white')
+                time_label.pack(pady=10)
+                
+                # Office info if available
+                if 'office' in result:
+                    office_label = tk.Label(content, text=f"Visiting: {result['office']}", 
+                                          font=("Arial", 14), fg="#666666", bg='white')
+                    office_label.pack(pady=5)
+                
+            else:
+                # Failure
+                icon_label = tk.Label(content, text="❌", font=("Arial", 60), bg='white')
+                icon_label.pack()
+                
+                title = tk.Label(content, text="ACCESS DENIED", 
+                               font=("Arial", 28, "bold"), fg="#dc3545", bg='white')
+                title.pack(pady=(20, 10))
+                
+                reason = result.get('reason', 'Verification requirements not met')
+                reason_label = tk.Label(content, text=reason, 
+                                      font=("Arial", 14), fg="#666666", bg='white', 
+                                      wraplength=400, justify="center")
+                reason_label.pack(pady=10)
             
-            # Office info if available
-            if 'office' in result:
-                office_label = tk.Label(content, text=f"Visiting: {result['office']}", 
-                                      font=("Arial", 14), fg="#666666", bg='white')
-                office_label.pack(pady=5)
-            
-        else:
-            # Failure
-            icon_label = tk.Label(content, text="❌", font=("Arial", 60), bg='white')
-            icon_label.pack()
-            
-            title = tk.Label(content, text="ACCESS DENIED", 
-                           font=("Arial", 28, "bold"), fg="#dc3545", bg='white')
-            title.pack(pady=(20, 10))
-            
-            reason = result.get('reason', 'Verification requirements not met')
-            reason_label = tk.Label(content, text=reason, 
-                                  font=("Arial", 14), fg="#666666", bg='white', 
-                                  wraplength=400, justify="center")
-            reason_label.pack(pady=10)
-        
-        # Auto close after 3 seconds
-        self.root.after(3000, self.close)
+            # Auto close after 3 seconds
+            self.root.after(3000, self.close)
+        except Exception as e:
+            print(f"Error showing final result: {e}")
+            self.close()
     
     def update_status(self, updates):
         """Update status from verification thread"""
-        for key, value in updates.items():
-            if key == 'helmet_status':
-                self.helmet_status.set(value)
-            elif key == 'license_status':
-                self.license_status.set(value)
-            elif key == 'current_step':
-                self.current_step.set(value)
-            elif key == 'guest_info':
-                self.show_guest_info(value)
-            elif key == 'verification_summary':
-                self.show_verification_summary(value)
-            elif key == 'final_result':
-                self.show_final_result(value)
+        try:
+            for key, value in updates.items():
+                if key == 'helmet_status':
+                    self.helmet_status.set(value)
+                elif key == 'license_status':
+                    self.license_status.set(value)
+                elif key == 'current_step':
+                    self.current_step.set(value)
+                elif key == 'guest_info':
+                    self.show_guest_info(value)
+                elif key == 'verification_summary':
+                    self.show_verification_summary(value)
+                elif key == 'final_result':
+                    self.show_final_result(value)
+        except Exception as e:
+            print(f"Error updating status: {e}")
     
     def start_verification(self):
         """Start verification in separate thread"""
@@ -451,21 +473,35 @@ class GuestVerificationGUI:
     
     def update_status_callback(self, status_dict):
         """Callback for status updates"""
-        self.root.after(0, lambda: self.update_status(status_dict))
+        try:
+            self.root.after(0, lambda: self.update_status(status_dict))
+        except Exception as e:
+            print(f"Error in callback: {e}")
     
     def close(self):
         """Close the GUI"""
-        self.verification_complete = True
-        self.root.quit()
-        self.root.destroy()
+        try:
+            self.verification_complete = True
+            
+            if hasattr(self, '_update_time'):
+                self.root.after_cancel(self._update_timer)
+				
+            self.root.quit()
+            self.root.destroy()
+        except Exception as e:
+            print(f"Error closing GUI: {e}")
     
     def run(self):
         """Run the GUI"""
-        # Bind escape key
-        self.root.bind('<Escape>', lambda e: self.close())
-        
-        # Start verification after GUI loads
-        self.root.after(1000, self.start_verification)
-        
-        # Start main loop
-        self.root.mainloop()
+        try:
+            # Bind escape key
+            self.root.bind('<Escape>', lambda e: self.close())
+            
+            # Start verification after GUI loads
+            self.root.after(1000, self.start_verification)
+            
+            # Start main loop
+            self.root.mainloop()
+        except Exception as e:
+            print(f"Error running GUI: {e}")
+            self.close()
