@@ -1,4 +1,4 @@
-# controllers/admin.py 
+# controllers/admin.py - Updated with GUI integration
 
 from config import ADMIN_MENU
 from services.fingerprint import *
@@ -11,10 +11,10 @@ from database.db_operations import (
 )
 
 from utils.display_helpers import (
-	display_menu, 
-	get_user_input, 
-	confirm_action, 
-	display_separator
+    display_menu, 
+    get_user_input, 
+    confirm_action, 
+    display_separator
 )
 
 import time
@@ -250,42 +250,43 @@ def admin_view_enrolled():
         print(f"   🎓 Students: {student_count}")
         print(f"   👔 Staff: {staff_count}")
         
-def admin_delete_fingerprint():
-    """Delete user fingerprint"""
+def admin_delete_fingerprint(slot_id=None):
+    """Delete user fingerprint with optional slot_id parameter for GUI"""
     database = load_fingerprint_database()
     if not database:
         print("📁 No users enrolled.")
         return
     
-    admin_view_enrolled()
+    if not slot_id:
+        admin_view_enrolled()
+        
+        try:
+            slot_id = get_user_input("Enter Slot ID to delete")
+        except:
+            print("❌ Cancelled.")
+            return
+    
+    if slot_id == "1":
+        print("❌ Cannot delete admin slot. Use 'Change Admin' option.")
+        return
+        
+    if slot_id not in database:
+        print("❌ Slot not found.")
+        return
+        
+    user_info = database[slot_id]
+    user_type = user_info.get('user_type', 'STUDENT')
+    user_id = user_info.get('student_id' if user_type == 'STUDENT' else 'staff_no', 'N/A')
+    
+    print(f"\n📋 Deleting: {user_info['name']} ({user_type} - ID: {user_id})")
     
     try:
-        finger_id = get_user_input("Enter Slot ID to delete")
-        
-        if finger_id == "1":
-            print("❌ Cannot delete admin slot. Use 'Change Admin' option.")
-            return
-            
-        if finger_id not in database:
-            print("❌ Slot not found.")
-            return
-            
-        user_info = database[finger_id]
-        user_type = user_info.get('user_type', 'STUDENT')
-        user_id = user_info.get('student_id' if user_type == 'STUDENT' else 'staff_no', 'N/A')
-        
-        print(f"\n📋 Deleting: {user_info['name']} ({user_type} - ID: {user_id})")
-        
-        if confirm_action(f"Delete {user_info['name']}?", dangerous=True):
-            if finger.delete_model(int(finger_id)) == adafruit_fingerprint.OK:
-                del database[finger_id]
-                save_fingerprint_database(database)
-                print(f"✅ Deleted {user_info['name']}")
-            else:
-                print("❌ Failed to delete from sensor.")
+        if finger.delete_model(int(slot_id)) == adafruit_fingerprint.OK:
+            del database[slot_id]
+            save_fingerprint_database(database)
+            print(f"✅ Deleted {user_info['name']}")
         else:
-            print("❌ Cancelled.")
-            
+            print("❌ Failed to delete from sensor.")
     except ValueError:
         print("❌ Invalid slot ID.")
         
@@ -300,12 +301,6 @@ def admin_reset_all():
         return
     
     try:
-        if finger.empty_library() == adafruit_fingerprint.OK:
-            save_fingerprint_database({})
-            print("✅ All student fingerprint data has been reset.")
-        else:
-            print("❌ Failed to clear sensor database.")
-
         database = load_fingerprint_database()
         
         # Delete all student fingerprints (preserve admin)
@@ -494,10 +489,11 @@ def admin_change_fingerprint():
     else:
         print("❌ Failed to change.")
 
-# =================== MAIN ADMIN PANEL ===================
+# =================== MAIN ADMIN PANEL WITH GUI ===================
 
 def admin_panel():
-    """Secured admin panel with fingerprint authentication"""
+    """Admin panel with GUI interface"""
+    print("\n🔧 ADMIN PANEL")
     
     # Check if admin fingerprint exists
     if not check_admin_fingerprint_exists():
@@ -515,35 +511,34 @@ def admin_panel():
         print("\n✅ Admin enrolled! You can now access admin panel.")
         input("Press Enter to continue...")
     
-    # Authenticate admin
-    print("\n🔐 ADMIN PANEL ACCESS")
-    
+    # Authenticate admin BEFORE opening GUI
+    print("\n🔐 ADMIN AUTHENTICATION REQUIRED")
     if not authenticate_admin():
         print("❌ Authentication failed! Access denied.")
         return
     
-    print("✅ Welcome to admin panel!")
+    print("✅ Authentication successful!")
+    print("🖥️ Opening admin GUI interface...")
     
-    # Admin panel loop
-    while True:
-        display_menu(ADMIN_MENU)
-        choice = get_user_input("Select option")
-        
-        actions = {
-            "1": admin_enroll,
-            "2": admin_view_enrolled,
-            "3": admin_delete_fingerprint,
-            "4": admin_reset_all,
-            "5": admin_sync_database,
-            "6": admin_view_time_records,
-            "7": admin_clear_time_records,
-            "0": admin_change_fingerprint  # Hidden option
-        }
-        
-        if choice in actions:
-            actions[choice]()
-        elif choice == "8":
-            break
-        else:
-            print("❌ Invalid option. Please try again.")
-            print("❌ Invalid option.")
+    # Import GUI here to avoid circular imports
+    from ui.admin_gui import AdminPanelGUI
+    
+    # Create admin functions dictionary for GUI
+    admin_functions = {
+        'authenticate': authenticate_admin,  # For re-authentication if needed
+        'enroll': admin_enroll,
+        'view_users': admin_view_enrolled,
+        'delete_fingerprint': admin_delete_fingerprint,
+        'sync': admin_sync_database,
+        'get_time_records': get_all_time_records,
+        'clear_records': admin_clear_time_records,
+        'get_stats': get_database_stats,
+        'change_admin': admin_change_fingerprint,
+        'reset': admin_reset_all
+    }
+    
+    # Create and run GUI (already authenticated)
+    gui = AdminPanelGUI(admin_functions, skip_auth=True)
+    gui.run()
+    
+    print("\n👋 Admin panel closed")

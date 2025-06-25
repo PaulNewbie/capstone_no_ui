@@ -2,7 +2,6 @@
 
 from services.license_reader import *
 from services.helmet_infer import verify_helmet
-from services.time_tracker import *
 from services.led_control import *  
 from services.buzzer_control import *
 from services.rpi_camera import force_camera_cleanup

@@ -235,81 +235,122 @@ class MotorPassGUI:
         counter_thread.start()
 
     def create_selection_interface(self):
-        """Create modern transparent selection interface"""
-        # Main overlay container - centered on screen
-        overlay_width = 500
-        overlay_height = 450
+        """Create modern glass-morphism selection interface"""
+        # Main overlay container - centered on screen with enhanced styling
+        overlay_width = 550
+        overlay_height = 500
         
-        # Use relative positioning for better cross-platform compatibility
-        self.main_overlay = tk.Frame(self.root, bg='white', bd=0, relief='flat')
+        # Create shadow effect (multiple layers for depth)
+        shadow_offsets = [(6, 6, '#404040'), (4, 4, '#505050'), (2, 2, '#606060')]
+        for offset_x, offset_y, shadow_color in shadow_offsets:
+            shadow_frame = tk.Frame(self.root, bg=shadow_color)
+            shadow_frame.place(relx=0.5, rely=0.5, 
+                             width=overlay_width, height=overlay_height, 
+                             anchor='center', x=offset_x, y=offset_y)
+        
+        # Main container with glass morphism effect
+        self.main_overlay = tk.Frame(self.root, bg='#2c1810', bd=0, relief='flat')
         self.main_overlay.place(relx=0.5, rely=0.5, width=overlay_width, height=overlay_height, anchor='center')
         
-        # Add subtle shadow effect
-        shadow_frame = tk.Frame(self.root, bg='#666666')
-        shadow_frame.place(relx=0.5, rely=0.5, width=overlay_width, height=overlay_height, anchor='center')
-        shadow_frame.lower()  # Put shadow behind main overlay
+        # Add border effect
+        border_frame = tk.Frame(self.main_overlay, bg='#D4AF37', height=3)
+        border_frame.pack(fill="x", side="top")
         
-        # Bring overlay to front
-        self.main_overlay.lift()
+        # Inner container with padding
+        inner_container = tk.Frame(self.main_overlay, bg='#2c1810')
+        inner_container.pack(fill="both", expand=True, padx=3, pady=3)
         
-        # Title section
-        title_frame = tk.Frame(self.main_overlay, bg='white', height=80)
-        title_frame.pack(fill="x", padx=0, pady=0)
-        title_frame.pack_propagate(False)
+        # Title section with enhanced styling
+        title_container = tk.Frame(inner_container, bg='#3d2317', height=100)
+        title_container.pack(fill="x", padx=15, pady=(15, 0))
+        title_container.pack_propagate(False)
         
-        title_label = tk.Label(title_frame, text="YOU ARE A:", 
-                              font=("Arial", 20, "bold"), fg="#333333", bg='white')
+        # Decorative line above title
+        deco_line = tk.Frame(title_container, bg='#D4AF37', height=2)
+        deco_line.pack(fill="x", pady=(10, 5))
+        
+        title_label = tk.Label(title_container, text="YOU ARE A:", 
+                              font=("Arial", 22, "bold"), fg="#F5DEB3", bg='#3d2317')
         title_label.pack(expand=True)
         
-        # Buttons container
-        buttons_frame = tk.Frame(self.main_overlay, bg='white')
-        buttons_frame.pack(fill="both", expand=True, padx=40, pady=20)
+        # Subtitle for better context
+        subtitle_label = tk.Label(title_container, text="Please select your access level", 
+                                 font=("Arial", 10), fg="#D4AF37", bg='#3d2317')
+        subtitle_label.pack(pady=(0, 10))
         
-        # Create user type buttons with modern styling
-        self.create_modern_button(buttons_frame, "STUDENT/STAFF", self.student_staff_clicked, "#DAA520")
-        self.create_modern_button(buttons_frame, "GUEST", self.guest_clicked, "#DAA520")
-        self.create_modern_button(buttons_frame, "ADMIN", self.admin_clicked, "#DAA520")
+        # Buttons container with enhanced styling
+        buttons_frame = tk.Frame(inner_container, bg='#2c1810')
+        buttons_frame.pack(fill="both", expand=True, padx=30, pady=20)
         
-        # Exit button
-        exit_frame = tk.Frame(self.main_overlay, bg='white', height=60)
-        exit_frame.pack(fill="x", padx=40, pady=(10, 20))
+        # Create user type buttons with enhanced modern styling
+        self.create_enhanced_button(buttons_frame, "👨‍🎓 STUDENT/STAFF", self.student_staff_clicked, "#D4AF37", "#8B7355")
+        self.create_enhanced_button(buttons_frame, "👤 GUEST", self.guest_clicked, "#D4AF37", "#8B7355")
+        self.create_enhanced_button(buttons_frame, "⚙️ ADMIN", self.admin_clicked, "#CD853F", "#A0522D")
+        
+        # Separator line
+        separator = tk.Frame(buttons_frame, bg='#5c3e28', height=1)
+        separator.pack(fill="x", pady=15)
+        
+        # Exit button with enhanced styling
+        exit_frame = tk.Frame(buttons_frame, bg='#2c1810', height=55)
+        exit_frame.pack(fill="x", pady=(5, 10))
         exit_frame.pack_propagate(False)
         
-        exit_btn = tk.Button(exit_frame, text="EXIT SYSTEM", 
-                           font=("Arial", 12, "bold"), bg="#8B4513", fg="white",
-                           bd=0, padx=30, pady=10, cursor="hand2",
-                           command=self.exit_system, relief='flat')
-        exit_btn.pack(expand=True)
+        exit_btn = tk.Button(exit_frame, text="🚪 EXIT SYSTEM", 
+                           font=("Arial", 12, "bold"), bg="#8B4513", fg="#F5DEB3",
+                           bd=0, cursor="hand2", command=self.exit_system, 
+                           relief='flat', activebackground="#A0522D", activeforeground="white")
+        exit_btn.pack(fill="both", expand=True, padx=10, pady=5)
         
-        # Hover effects for exit button
+        # Enhanced hover effects for exit button
         def exit_on_enter(e):
-            exit_btn.config(bg="#A0522D")
+            exit_btn.config(bg="#A0522D", relief='raised', bd=1)
         def exit_on_leave(e):
-            exit_btn.config(bg="#8B4513")
+            exit_btn.config(bg="#8B4513", relief='flat', bd=0)
         
         exit_btn.bind("<Enter>", exit_on_enter)
         exit_btn.bind("<Leave>", exit_on_leave)
         
-    def create_modern_button(self, parent, text, command, color):
-        """Create modern styled button with hover effects"""
-        btn_frame = tk.Frame(parent, bg='white', height=60)
+        # Bring overlay to front
+        self.main_overlay.lift()
+        
+    def create_enhanced_button(self, parent, text, command, primary_color, secondary_color):
+        """Create enhanced styled button with advanced hover effects and icons"""
+        btn_frame = tk.Frame(parent, bg='#2c1810', height=65)
         btn_frame.pack(fill="x", pady=8)
         btn_frame.pack_propagate(False)
         
-        btn = tk.Button(btn_frame, text=text, font=("Arial", 16, "bold"),
-                       bg=color, fg="#333333", bd=0, cursor="hand2",
-                       command=command, relief='flat')
-        btn.pack(fill="both", expand=True, padx=5, pady=5)
+        # Button container for 3D effect
+        btn_container = tk.Frame(btn_frame, bg=secondary_color, bd=0)
+        btn_container.pack(fill="both", expand=True, padx=8, pady=3)
         
-        # Hover effects
+        # Main button
+        btn = tk.Button(btn_container, text=text, font=("Arial", 14, "bold"),
+                       bg=primary_color, fg="#2F1B14", bd=0, cursor="hand2",
+                       command=command, relief='flat', 
+                       activebackground="#F0E68C", activeforeground="#2F1B14",
+                       padx=20, pady=15)
+        btn.pack(fill="both", expand=True, padx=2, pady=2)
+        
+        # Advanced hover effects with smooth transitions
         def on_enter(e):
-            btn.config(bg="#F0E68C")  # Lighter gold on hover
+            btn.config(bg="#F0E68C", relief='raised', bd=1)
+            btn_container.config(bg="#B8860B")
+            # Add subtle scaling effect
+            btn.config(font=("Arial", 15, "bold"))
             
         def on_leave(e):
-            btn.config(bg=color)
+            btn.config(bg=primary_color, relief='flat', bd=0)
+            btn_container.config(bg=secondary_color)
+            btn.config(font=("Arial", 14, "bold"))
+            
+        def on_click(e):
+            btn.config(bg="#DAA520", relief='sunken')
+            parent.after(100, lambda: btn.config(relief='flat'))
             
         btn.bind("<Enter>", on_enter)
         btn.bind("<Leave>", on_leave)
+        btn.bind("<Button-1>", on_click)
         
     def student_staff_clicked(self):
         """Handle student button click"""

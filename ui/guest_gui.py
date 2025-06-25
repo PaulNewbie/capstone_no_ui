@@ -25,9 +25,8 @@ class GuestVerificationGUI:
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         
-        # Set window size (90% of screen)
-        window_width = int(screen_width * 0.9)
-        window_height = int(screen_height * 0.9)
+        window_width = int(screen_width * 1)
+        window_height = int(screen_height * 0.95)
         
         # Center window
         x = (screen_width - window_width) // 2
