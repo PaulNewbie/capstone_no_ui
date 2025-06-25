@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block title %}Time Records - {{ system_name }}{% endblock %}
+
+{% block page_title %}Time Records{% endblock %}
+
+{% block content %}
+<!-- Filter Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="data-table">
+            <h5 class="mb-3">Filter Options</h5>
+            <form id="filter-form" class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Date From</label>
+                    <input type="date" class="form-control" id="date-from" name="date_from">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Date To</label>
+                    <input type="date" class="form-control" id="date-to" name="date_to">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Person Type</label>
+                    <select class="form-select" id="person-type" name="person_type">
+                        <option value="">All Types</option>
+                        <option value="STUDENT">Students Only</option>
+                        <option value="GUEST">Guests Only</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-search"></i> Search
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Records Table -->
+<div class="row">
+    <div class="col-12">
+        <div class="data-table">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">Time Records</h5>
+                <div>
+                    <span class="text-muted">Total Records: <span id="record-count">0</span></span>
+                </div>
+            </div>
+            
+            <div class="loading" id="records-loading">
+                <i class="fas fa-spinner fa-spin"></i> Loading records...
+            </div>
+            
+            <div class="table-responsive">
+                <table class="table table-hover" id="records-table" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Time</th>
+                            <th>ID</th>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="records-tbody">
+                        <!-- Will be populated by JavaScript -->
+                    </tbody>
+                </table>
+                
+                <div id="no-records" style="display: none;" class="text-center py-4 text-muted">
+                    <i class="fas fa-info-circle"></i> No records found for the selected filters
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Set default dates (today)
+$(document).ready(function() {
+    const today = new Date().toISOString().split('T')[0];
+    $('#date-from').val(today);
+    $('#date-to').val(today);
+    
+    // Load initial data
+    loadRecords();
+    
+    // Handle form submission
+    $('#filter-form').on('submit', function(e) {
+        e.preventDefault();
+        loadRecords();
+    });
+});
+
+// Load records with filters
+function loadRecords() {
+    $('#records-loading').addClass('show');
+    $('#records-table').hide();
+    $('#no-records').hide();
+    
+    const params = {
+        date_from: $('#date-from').val(),
+        date_to: $('#date-to').val(),
+        person_type: $('#person-type').val(),
+        limit: 500
+    };
+    
+    $.ajax({
+        url: '/api/time-records',
+        method: 'GET',
+        data: params,
+        success: function(data) {
+            $('#records-loading').removeClass('show');
+            
+            if (data.success) {
+                displayRecords(data.records);
+                $('#record-count').text(data.records.length);
+            }
+        },
+        error: function(xhr, status, error) {
+            $('#records-loading').removeClass('show');
+            console.error('Error loading records:', error);
+            alert('Error loading records. Please try again.');
+        }
+    });
+}
+
+// Display records in table
+function displayRecords(records) {
+    const tbody = $('#records-tbody');
+    tbody.empty();
+    
+    if (records.length === 0) {
+        $('#records-table').hide();
+        $('#no-records').show();
+    } else {
+        $('#records-table').show();
+        $('#no-records').hide();
+        
+        records.forEach(function(record) {
+            const typeClass = record.person_type === 'STUDENT' ? 'badge-student' : 'badge-guest';
+            const actionClass = record.action === 'IN' ? 'badge-in' : 'badge-out';
+            
+            const row = `
+                <tr>
+                    <td>${record.date}</td>
+                    <td>${record.time}</td>
+                    <td>${record.person_id}</td>
+                    <td>${record.person_name}</td>
+                    <td><span class="badge ${typeClass}">${record.person_type}</span></td>
+                    <td><span class="badge ${actionClass}">${record.action}</span></td>
+                </tr>
+            `;
+            tbody.append(row);
+        });
+    }
+}
+</script>
+{% endblock %}

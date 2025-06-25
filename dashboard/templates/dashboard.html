@@ -1,0 +1,359 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - {{ system_name }}{% endblock %}
+
+{% block page_title %}Dashboard Overview{% endblock %}
+
+{% block content %}
+<!-- Statistics Cards -->
+<div class="row mb-4">
+    <div class="col-xl-3 col-md-6">
+        <div class="stat-card primary">
+            <div class="stat-icon">
+                <i class="fas fa-users"></i>
+            </div>
+            <h3 id="total-inside">0</h3>
+            <p>Currently Inside</p>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6">
+        <div class="stat-card success">
+            <div class="stat-icon">
+                <i class="fas fa-user-graduate"></i>
+            </div>
+            <h3 id="students-inside">0</h3>
+            <p>Students Inside</p>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6">
+        <div class="stat-card info">
+            <div class="stat-icon">
+                <i class="fas fa-user-tie"></i>
+            </div>
+            <h3 id="staff-inside">0</h3>
+            <p>Staff Inside</p>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6">
+        <div class="stat-card warning">
+            <div class="stat-icon">
+                <i class="fas fa-user-friends"></i>
+            </div>
+            <h3 id="guests-inside">0</h3>
+            <p>Guests Inside</p>
+        </div>
+    </div>
+</div>
+
+<!-- Today's Summary -->
+<div class="row mb-4">
+    <div class="col-md-4">
+        <div class="data-table">
+            <h5 class="mb-3">Today's Student Activity</h5>
+            <div class="row">
+                <div class="col-6">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="me-3">
+                            <i class="fas fa-sign-in-alt text-success" style="font-size: 24px;"></i>
+                        </div>
+                        <div>
+                            <h4 class="mb-0" id="students-in-today">0</h4>
+                            <small class="text-muted">Time In</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="me-3">
+                            <i class="fas fa-sign-out-alt text-danger" style="font-size: 24px;"></i>
+                        </div>
+                        <div>
+                            <h4 class="mb-0" id="students-out-today">0</h4>
+                            <small class="text-muted">Time Out</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="data-table">
+            <h5 class="mb-3">Today's Staff Activity</h5>
+            <div class="row">
+                <div class="col-6">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="me-3">
+                            <i class="fas fa-sign-in-alt text-success" style="font-size: 24px;"></i>
+                        </div>
+                        <div>
+                            <h4 class="mb-0" id="staff-in-today">0</h4>
+                            <small class="text-muted">Time In</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="me-3">
+                            <i class="fas fa-sign-out-alt text-danger" style="font-size: 24px;"></i>
+                        </div>
+                        <div>
+                            <h4 class="mb-0" id="staff-out-today">0</h4>
+                            <small class="text-muted">Time Out</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="data-table">
+            <h5 class="mb-3">Today's Guest Activity</h5>
+            <div class="row">
+                <div class="col-6">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="me-3">
+                            <i class="fas fa-sign-in-alt text-success" style="font-size: 24px;"></i>
+                        </div>
+                        <div>
+                            <h4 class="mb-0" id="guests-in-today">0</h4>
+                            <small class="text-muted">Time In</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="me-3">
+                            <i class="fas fa-sign-out-alt text-danger" style="font-size: 24px;"></i>
+                        </div>
+                        <div>
+                            <h4 class="mb-0" id="guests-out-today">0</h4>
+                            <small class="text-muted">Time Out</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- People Currently Inside -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="data-table">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">People Currently Inside</h5>
+                <small class="text-muted">Last updated: <span id="last-update">Never</span></small>
+            </div>
+            
+            <div class="loading" id="people-loading">
+                <i class="fas fa-spinner fa-spin"></i> Loading...
+            </div>
+            
+            <div class="table-responsive">
+                <table class="table table-hover" id="people-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Details</th>
+                            <th>Time In</th>
+                            <th>Duration</th>
+                        </tr>
+                    </thead>
+                    <tbody id="people-tbody">
+                        <!-- Will be populated by JavaScript -->
+                    </tbody>
+                </table>
+                
+                <div id="no-people" style="display: none;" class="text-center py-4 text-muted">
+                    <i class="fas fa-info-circle"></i> No one is currently inside
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Activities -->
+<div class="row">
+    <div class="col-12">
+        <div class="data-table">
+            <h5 class="mb-3">Recent Activities</h5>
+            
+            <div class="loading" id="activities-loading">
+                <i class="fas fa-spinner fa-spin"></i> Loading...
+            </div>
+            
+            <div class="table-responsive">
+                <table class="table table-hover" id="activities-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Person</th>
+                            <th>Type</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="activities-tbody">
+                        <!-- Will be populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Update interval (5 seconds)
+const UPDATE_INTERVAL = 5000;
+
+// Load dashboard data
+function loadDashboardData() {
+    $.ajax({
+        url: '/api/dashboard-data',
+        method: 'GET',
+        success: function(data) {
+            if (data.success) {
+                updateStatistics(data.summary);
+                updatePeopleInside(data.people_inside);
+                $('#last-update').text(new Date().toLocaleTimeString());
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('Error loading dashboard data:', error);
+        }
+    });
+}
+
+// Load recent activities
+function loadRecentActivities() {
+    $('#activities-loading').addClass('show');
+    
+    $.ajax({
+        url: '/api/recent-activities',
+        method: 'GET',
+        success: function(data) {
+            $('#activities-loading').removeClass('show');
+            
+            if (data.success) {
+                updateActivitiesTable(data.activities);
+            }
+        },
+        error: function(xhr, status, error) {
+            $('#activities-loading').removeClass('show');
+            console.error('Error loading activities:', error);
+        }
+    });
+}
+
+// Update statistics cards
+function updateStatistics(summary) {
+    $('#total-inside').text(summary.total_inside || 0);
+    $('#students-inside').text(summary.students_inside || 0);
+    $('#staff-inside').text(summary.staff_inside || 0);
+    $('#guests-inside').text(summary.guests_inside || 0);
+    
+    $('#students-in-today').text(summary.today_students_in || 0);
+    $('#students-out-today').text(summary.today_students_out || 0);
+    $('#staff-in-today').text(summary.today_staff_in || 0);
+    $('#staff-out-today').text(summary.today_staff_out || 0);
+    $('#guests-in-today').text(summary.today_guests_in || 0);
+    $('#guests-out-today').text(summary.today_guests_out || 0);
+}
+
+// Update people inside table
+function updatePeopleInside(people) {
+    const tbody = $('#people-tbody');
+    tbody.empty();
+    
+    if (people.length === 0) {
+        $('#people-table').hide();
+        $('#no-people').show();
+    } else {
+        $('#people-table').show();
+        $('#no-people').hide();
+        
+        people.forEach(function(person) {
+            const timeIn = new Date(person.time_in);
+            const now = new Date();
+            const duration = formatDuration(now - timeIn);
+            
+            let typeClass = 'badge-secondary';
+            if (person.type === 'STUDENT') typeClass = 'badge-student';
+            else if (person.type === 'STAFF') typeClass = 'badge-info';
+            else if (person.type === 'GUEST') typeClass = 'badge-guest';
+            
+            const row = `
+                <tr>
+                    <td>${person.id}</td>
+                    <td>${person.name}</td>
+                    <td><span class="badge ${typeClass}">${person.type}</span></td>
+                    <td>${person.details}</td>
+                    <td>${timeIn.toLocaleTimeString()}</td>
+                    <td>${duration}</td>
+                </tr>
+            `;
+            tbody.append(row);
+        });
+    }
+}
+
+// Update activities table
+function updateActivitiesTable(activities) {
+    const tbody = $('#activities-tbody');
+    tbody.empty();
+    
+    activities.forEach(function(activity) {
+        const actionClass = activity.action === 'IN' ? 'badge-in' : 'badge-out';
+        
+        let typeClass = 'badge-secondary';
+        if (activity.person_type === 'STUDENT') typeClass = 'badge-student';
+        else if (activity.person_type === 'STAFF') typeClass = 'badge-info';
+        else if (activity.person_type === 'GUEST') typeClass = 'badge-guest';
+        
+        const row = `
+            <tr>
+                <td>${activity.time}</td>
+                <td>${activity.person_name}</td>
+                <td><span class="badge ${typeClass}">${activity.person_type}</span></td>
+                <td><span class="badge ${actionClass}">${activity.action}</span></td>
+            </tr>
+        `;
+        tbody.append(row);
+    });
+}
+
+// Format duration
+function formatDuration(milliseconds) {
+    const seconds = Math.floor(milliseconds / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    
+    if (hours > 0) {
+        return `${hours}h ${minutes % 60}m`;
+    } else if (minutes > 0) {
+        return `${minutes}m`;
+    } else {
+        return `${seconds}s`;
+    }
+}
+
+// Initialize
+$(document).ready(function() {
+    // Load initial data
+    loadDashboardData();
+    loadRecentActivities();
+    
+    // Set up auto-refresh
+    setInterval(loadDashboardData, UPDATE_INTERVAL);
+    setInterval(loadRecentActivities, UPDATE_INTERVAL * 2); // Less frequent
+});
+</script>
+{% endblock %}

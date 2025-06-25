@@ -1,10 +1,10 @@
-# services/helmet_infer.py - Updated for RPi Camera 3
+# services/helmet_infer.py - Fixed with proper camera cleanup
 
 import cv2
 import numpy as np
 import onnxruntime as ort
 import time
-from services.rpi_camera import get_camera
+from services.rpi_camera import get_camera, force_camera_cleanup, CameraContext
 
 # === Helmet Detection Config ===
 MODEL_PATH = "best.onnx"
@@ -81,6 +81,10 @@ def verify_helmet():
     print("⚠️ Please wear your FULL-FACE helmet before proceeding")
     print(f"📷 Using RPi Camera 3 for {HELMET_DETECTION_DURATION} seconds...")
     print("📱 Press 'q' or ESC to cancel verification")
+    
+    # Force cleanup before starting
+    from services.rpi_camera import force_camera_cleanup, get_camera
+    force_camera_cleanup()
     
     # Get camera instance
     camera = get_camera()
@@ -206,6 +210,7 @@ def verify_helmet():
                         cv2.waitKey(2000)  # Show success for 2 seconds
                         
                         cv2.destroyAllWindows()
+                        force_camera_cleanup()
                         return True
             else:
                 consecutive_detections = 0
@@ -248,5 +253,6 @@ def verify_helmet():
     
     finally:
         cv2.destroyAllWindows()
+        force_camera_cleanup()
     
     return False

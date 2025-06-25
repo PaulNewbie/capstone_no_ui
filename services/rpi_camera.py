@@ -1,4 +1,4 @@
-# services/rpi_camera.py - Fixed with proper cleanup
+# services/rpi_camera.py - Simple fix that reuses camera instance
 
 import cv2
 import numpy as np
@@ -12,128 +12,112 @@ try:
     RPI_CAMERA_AVAILABLE = True
 except ImportError:
     RPI_CAMERA_AVAILABLE = False
-    
-# Global camera instance - singleton pattern
+
+# Global camera instance - keep it alive
 _camera_instance = None
-_camera_lock = False  # Prevent multiple camera access
+_picamera2_instance = None  # Keep the actual Picamera2 object
 
 def get_camera():
     """Get global camera instance (singleton)"""
-    global _camera_instance, _camera_lock
-    
-    # Wait if camera is locked
-    timeout = 10  # 10 second timeout
-    start_time = time.time()
-    while _camera_lock and (time.time() - start_time < timeout):
-        time.sleep(0.1)
-    
-    if _camera_lock:
-        print("⚠️ Camera is locked by another process")
-        # Return a dummy camera object instead of None
-        class DummyCamera:
-            initialized = False
-            def get_frame(self):
-                return None
-        return DummyCamera()
-        
-    _camera_lock = True
+    global _camera_instance
     
     if _camera_instance is None:
         _camera_instance = RPiCameraService()
+    elif not _camera_instance.initialized:
+        # Try to reinitialize if not initialized
+        _camera_instance._initialize_camera()
+    
     return _camera_instance
 
+def force_camera_cleanup():
+    """Only cleanup OpenCV windows, keep camera running"""
+    print("🧹 Cleaning up OpenCV windows...")
+    
+    # Destroy any OpenCV windows
+    for _ in range(3):
+        try:
+            cv2.destroyAllWindows()
+            cv2.waitKey(1)
+        except:
+            pass
+    
+    print("✅ OpenCV cleanup completed")
+
 def release_camera():
-    """Release global camera instance"""
-    global _camera_instance, _camera_lock
-    if _camera_instance:
-        _camera_instance.release()
-        _camera_instance = None
-    _camera_lock = False
+    """Don't actually release - just cleanup windows"""
+    force_camera_cleanup()
 
 class RPiCameraService:
     def __init__(self):
         self.camera = None
         self.initialized = False
-        self.in_use = False
         if RPI_CAMERA_AVAILABLE:
             self._initialize_camera()
     
     def _initialize_camera(self):
-        """Initialize RPi Camera with suppressed libcamera logs"""
-        if not RPI_CAMERA_AVAILABLE:
-            raise Exception("RPi Camera not available - picamera2 not installed")
+        """Initialize RPi Camera - reuse existing if possible"""
+        global _picamera2_instance
         
-        if self.in_use:
-            print("⚠️ Camera already in use")
+        if not RPI_CAMERA_AVAILABLE:
             return False
             
         try:
-            # Suppress libcamera verbose logging
+            # Suppress libcamera logs
             os.environ['LIBCAMERA_LOG_LEVELS'] = 'ERROR'
             
-            # Clean up any existing camera instances
-            self._force_cleanup()
+            # Reuse existing camera if available
+            if _picamera2_instance is not None:
+                print("📷 Reusing existing camera instance...")
+                self.camera = _picamera2_instance
+                self.initialized = True
+                return True
             
+            print("📷 Creating new camera instance...")
+            
+            # Create new camera instance
             self.camera = Picamera2()
+            _picamera2_instance = self.camera  # Store globally
             
-            # Use default configuration
+            # Configure
             config = self.camera.create_preview_configuration(
-                main={"size": RPI_CAMERA_RESOLUTION}
+                main={"size": RPI_CAMERA_RESOLUTION, "format": "RGB888"}
             )
-            
             self.camera.configure(config)
+            
+            # Start camera
             self.camera.start()
             time.sleep(RPI_CAMERA_WARMUP_TIME)
             
-            # Add auto-focus control silently
+            # Try to set autofocus
             try:
                 from libcamera import controls
                 self.camera.set_controls({
                     "AfMode": controls.AfModeEnum.Continuous,
                     "AfSpeed": controls.AfSpeedEnum.Fast,
                 })
-                time.sleep(2)
-            except Exception:
-                pass  # Ignore auto-focus errors silently
+            except:
+                pass
             
             self.initialized = True
-            self.in_use = True
+            print("✅ Camera initialized successfully")
             return True
             
         except Exception as e:
+            print(f"❌ Camera initialization failed: {e}")
             self.initialized = False
-            self.in_use = False
-            self._force_cleanup()
-            raise e
-    
-    def _force_cleanup(self):
-        """Force cleanup of any existing camera resources"""
-        try:
-            # Try to find and stop any existing Picamera2 instances
-            if hasattr(self, 'camera') and self.camera:
-                try:
-                    self.camera.stop()
-                    self.camera.close()
-                except:
-                    pass
-            
-            # Small delay to ensure resources are freed
-            time.sleep(0.5)
-        except:
-            pass
+            return False
     
     def get_frame(self):
         """Get current frame from camera"""
         if not self.initialized or not self.camera:
-            print("⚠️ Camera not initialized")
             return None
         
         try:
             frame = self.camera.capture_array()
             
-            # Convert format appropriately
-            if len(frame.shape) == 3:
-                if frame.shape[2] == 4:  # RGBA/XRGB format
+            # Convert format if needed
+            if frame is not None and len(frame.shape) == 3:
+                if frame.shape[2] == 4:  # RGBA format
                     frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
                 elif frame.shape[2] == 3:  # RGB format
                     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
@@ -141,101 +125,56 @@ class RPiCameraService:
             return frame
         except Exception as e:
             print(f"⚠️ Error getting frame: {e}")
+            # Try to reinitialize
+            self._initialize_camera()
             return None
-    
-    def trigger_autofocus(self):
-        """Manually trigger auto-focus when needed"""
-        if not self.initialized:
-            return False
-        
-        try:
-            from libcamera import controls
-            self.camera.set_controls({"AfTrigger": controls.AfTriggerEnum.Start})
-            time.sleep(1.5)
-            return True
-        except Exception:
-            return False
-    
-    def capture_image(self, filename=None, with_focus=True):
-        """Capture and save image to file"""
-        if not self.initialized:
-            return None
-        
-        if filename is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"capture_{timestamp}.jpg"
-        
-        try:
-            if with_focus:
-                self.trigger_autofocus()
-            
-            os.makedirs(os.path.dirname(filename) if os.path.dirname(filename) else ".", exist_ok=True)
-            self.camera.capture_file(filename)
-            return filename
-            
-        except Exception:
-            return None
-    
-    def test_camera(self):
-        """Simple camera test"""
-        if not self.initialized:
-            return False
-        
-        try:
-            frame = self.get_frame()
-            return frame is not None
-        except Exception:
-            return False
     
     def release(self):
-        """Release camera resources"""
-        self.in_use = False
-        if self.camera:
-            try:
-                self.camera.stop()
-                self.camera.close()
-                self.camera = None
-            except Exception as e:
-                print(f"⚠️ Error releasing camera: {e}")
-        self.initialized = False
-    
-    def __del__(self):
-        """Destructor to ensure camera is released"""
-        self.release()
+        """Don't actually release - keep camera running"""
+        pass
 
-# Context manager for camera operations
+# Context manager for safe camera operations
 class CameraContext:
-    """Context manager for safe camera operations"""
+    """Context manager that only cleans OpenCV windows"""
     def __enter__(self):
+        force_camera_cleanup()  # Clean windows before use
         self.camera = get_camera()
         return self.camera
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        release_camera()
-        # Force cleanup of OpenCV windows
-        try:
-            cv2.destroyAllWindows()
-        except:
-            pass
+        force_camera_cleanup()  # Clean windows after use
         return False
 
-# Helper function to ensure camera cleanup
+# Helper to ensure cleanup
 def ensure_camera_cleanup():
-    """Force cleanup of all camera resources"""
-    global _camera_instance, _camera_lock
+    """Just cleanup OpenCV windows"""
+    force_camera_cleanup()
+
+# Emergency reset function
+def emergency_camera_reset():
+    """Force reset camera if really needed"""
+    global _camera_instance, _picamera2_instance
     
-    # Release camera
-    release_camera()
+    print("🚨 Emergency camera reset!")
     
-    # Force OpenCV cleanup
+    # Try to stop camera
+    if _picamera2_instance:
+        try:
+            _picamera2_instance.stop()
+            _picamera2_instance.close()
+        except:
+            pass
+    
+    # Reset instances
+    _camera_instance = None
+    _picamera2_instance = None
+    
+    # Kill processes
     try:
-        cv2.destroyAllWindows()
-        # Wait a bit for cleanup
-        cv2.waitKey(1)
+        import subprocess
+        subprocess.run(['pkill', '-f', 'libcamera'], capture_output=True)
     except:
         pass
     
-    # Reset lock
-    _camera_lock = False
-    
-    print("✅ Camera cleanup completed")
+    time.sleep(2)
+    print("✅ Emergency reset complete")

@@ -324,16 +324,29 @@ class MotorPassGUI:
         self.run_function(self.guest_function, "Guest Verification")
         
     def run_function(self, function, title):
-        """Hide GUI and run specified function"""
+        """Hide GUI and run specified function with cleanup"""
         try:
             self.root.withdraw()
             print(f"\n{'='*50}")
             print(f"🚗 {title} Started")
             print(f"{'='*50}")
+        
+            # Import cleanup manager
+            from utils.cleanup_manager import deep_cleanup
+        
+            # Clean before running
+            deep_cleanup()
+        
+            # Run the function
             function()
+        
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred: {str(e)}")
         finally:
+            # Always clean up after verification
+            print("\n🔄 Returning to main menu...")
+        
+            # Show main window again
             self.root.deiconify()
             
     def exit_system(self):

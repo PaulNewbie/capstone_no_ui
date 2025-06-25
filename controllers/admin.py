@@ -7,8 +7,7 @@ from database.db_operations import (
     get_all_time_records,
     clear_all_time_records,
     get_students_currently_in,
-    get_database_stats,
-    backup_databases
+    get_database_stats
 )
 
 from utils.display_helpers import (

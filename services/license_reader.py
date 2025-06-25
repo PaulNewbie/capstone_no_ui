@@ -676,12 +676,12 @@ def package_name_info(structured_data: Dict[str, str], basic_text: str, fingerpr
     )
 
 # ============== CAMERA FUNCTIONS ==============
-
 def auto_capture_license_rpi(reference_name: str = "", fingerprint_info: Optional[dict] = None, retry_mode: bool = False) -> Optional[str]:
     """Auto-capture license using RPi Camera with ROI-only enhancement and stability tracking"""
-    camera = get_camera()
-    if not camera.initialized:
-        return None
+    
+    # Force cleanup before starting
+    from services.rpi_camera import force_camera_cleanup, CameraContext
+    force_camera_cleanup()
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     prefix = f"motorpass_license_{fingerprint_info.get('student_id', 'guest')}_{timestamp}" if fingerprint_info else f"motorpass_license_{timestamp}"
@@ -709,8 +709,7 @@ def auto_capture_license_rpi(reference_name: str = "", fingerprint_info: Optiona
     good_readings_count = 0
     green_start_time = None
     
-    cv2.namedWindow("MotorPass - License Capture", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("MotorPass - License Capture", SCREEN_WIDTH, SCREEN_HEIGHT)
+    print("\n📄 Starting license capture...")
     
     def _enhance_roi_only(roi, keyword_count):
         """Enhance only the ROI based on keyword detection"""
@@ -760,252 +759,275 @@ def auto_capture_license_rpi(reference_name: str = "", fingerprint_info: Optiona
                 return 3
     
     try:
-        while True:
-            frame = camera.get_frame()
-            if frame is None:
-                break
+        # Use context manager for guaranteed cleanup
+        with CameraContext() as camera:
+            if not camera.initialized:
+                print("❌ Failed to initialize camera for license capture")
+                safe_delete_temp_file(temp_filename)
+                return None
             
-            original_h, original_w = frame.shape[:2]
-            scale = min(SCREEN_WIDTH / original_w, SCREEN_HEIGHT / original_h)
-            new_w, new_h = int(original_w * scale), int(original_h * scale)
+            cv2.namedWindow("MotorPass - License Capture", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("MotorPass - License Capture", SCREEN_WIDTH, SCREEN_HEIGHT)
             
-            # Keep display frame normal - no global brightness changes
-            brightened = cv2.convertScaleAbs(frame, alpha=1.2, beta=20)
-            mirrored = cv2.flip(brightened, 1)
-            display_frame = cv2.resize(mirrored, (new_w, new_h))
-            
-            center_x, center_y = new_w // 2, new_h // 2
-            box_x1 = max(0, center_x - BOX_WIDTH // 2)
-            box_y1 = max(0, center_y - BOX_HEIGHT // 2)
-            box_x2 = min(new_w, center_x + BOX_WIDTH // 2)
-            box_y2 = min(new_h, center_y + BOX_HEIGHT // 2)
-            
-            frame_count += 1
-            roi_enhancement_level = 1.0  # Track current ROI enhancement
-            
-            # Check for license keywords with stability tracking
-            if frame_count % KEYWORD_CHECK_INTERVAL == 0:
-                try:
-                    orig_box_x1, orig_box_y1 = int(box_x1 / scale), int(box_y1 / scale)
-                    orig_box_x2, orig_box_y2 = int(box_x2 / scale), int(box_y2 / scale)
-                    
-                    # Extract ROI from original brightened frame
-                    roi = brightened[orig_box_y1:orig_box_y2, orig_box_x1:orig_box_x2]
-                    
-                    if roi.size > 0:
-                        # Enhance only the ROI based on previous detection
-                        enhanced_roi, roi_enhancement_level = _enhance_roi_only(roi, current_keywords)
+            while True:
+                frame = camera.get_frame()
+                if frame is None:
+                    print("❌ Failed to get frame for license capture")
+                    break
+                
+                original_h, original_w = frame.shape[:2]
+                scale = min(SCREEN_WIDTH / original_w, SCREEN_HEIGHT / original_h)
+                new_w, new_h = int(original_w * scale), int(original_h * scale)
+                
+                # Keep display frame normal - no global brightness changes
+                brightened = cv2.convertScaleAbs(frame, alpha=1.2, beta=20)
+                mirrored = cv2.flip(brightened, 1)
+                display_frame = cv2.resize(mirrored, (new_w, new_h))
+                
+                center_x, center_y = new_w // 2, new_h // 2
+                box_x1 = max(0, center_x - BOX_WIDTH // 2)
+                box_y1 = max(0, center_y - BOX_HEIGHT // 2)
+                box_x2 = min(new_w, center_x + BOX_WIDTH // 2)
+                box_y2 = min(new_h, center_y + BOX_HEIGHT // 2)
+                
+                frame_count += 1
+                roi_enhancement_level = 1.0  # Track current ROI enhancement
+                
+                # Check for license keywords with stability tracking
+                if frame_count % KEYWORD_CHECK_INTERVAL == 0:
+                    try:
+                        orig_box_x1, orig_box_y1 = int(box_x1 / scale), int(box_y1 / scale)
+                        orig_box_x2, orig_box_y2 = int(box_x2 / scale), int(box_y2 / scale)
                         
-                        # Perform OCR on enhanced ROI
-                        gray_roi = cv2.cvtColor(enhanced_roi, cv2.COLOR_BGR2GRAY)
-                        thresh_roi = cv2.threshold(gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
-                        quick_text = pytesseract.image_to_string(thresh_roi, config=OCR_CONFIG_FAST).upper()
+                        # Extract ROI from original brightened frame
+                        roi = brightened[orig_box_y1:orig_box_y2, orig_box_x1:orig_box_x2]
                         
-                        current_keywords = sum(1 for keyword in VERIFICATION_KEYWORDS if keyword in quick_text)
-                        
-                        # Update keyword history for stability
-                        keyword_history.append(current_keywords)
-                        if len(keyword_history) > KEYWORD_HISTORY_SIZE:
-                            keyword_history.pop(0)
-                        
-                        # Check if currently in green state
-                        is_currently_green = ready_time is not None
-                        keywords_needed = _get_adaptive_threshold(current_keywords, keyword_history, is_currently_green)
-                        
-                        # Stability logic for going green
-                        if current_keywords >= keywords_needed:
-                            good_readings_count += 1
+                        if roi.size > 0:
+                            # Enhance only the ROI based on previous detection
+                            enhanced_roi, roi_enhancement_level = _enhance_roi_only(roi, current_keywords)
                             
-                            # First time going green - need stable readings
-                            if not is_currently_green and good_readings_count >= STABILITY_FRAMES:
-                                ready_time = time.time()
-                                green_start_time = time.time()
-                                good_readings_count = 0  # Reset counter
-                            # Already green - stay green with hysteresis
-                            elif is_currently_green:
-                                pass  # Keep ready_time as is
-                        else:
-                            good_readings_count = 0
+                            # Perform OCR on enhanced ROI
+                            gray_roi = cv2.cvtColor(enhanced_roi, cv2.COLOR_BGR2GRAY)
+                            thresh_roi = cv2.threshold(gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+                            quick_text = pytesseract.image_to_string(thresh_roi, config=OCR_CONFIG_FAST).upper()
                             
-                            # Only lose green state if enough time has passed
-                            if is_currently_green and green_start_time:
-                                time_green = time.time() - green_start_time
-                                if time_green >= MIN_GREEN_TIME:
+                            current_keywords = sum(1 for keyword in VERIFICATION_KEYWORDS if keyword in quick_text)
+                            
+                            # Update keyword history for stability
+                            keyword_history.append(current_keywords)
+                            if len(keyword_history) > KEYWORD_HISTORY_SIZE:
+                                keyword_history.pop(0)
+                            
+                            # Check if currently in green state
+                            is_currently_green = ready_time is not None
+                            keywords_needed = _get_adaptive_threshold(current_keywords, keyword_history, is_currently_green)
+                            
+                            # Stability logic for going green
+                            if current_keywords >= keywords_needed:
+                                good_readings_count += 1
+                                
+                                # First time going green - need stable readings
+                                if not is_currently_green and good_readings_count >= STABILITY_FRAMES:
+                                    ready_time = time.time()
+                                    green_start_time = time.time()
+                                    good_readings_count = 0  # Reset counter
+                                # Already green - stay green with hysteresis
+                                elif is_currently_green:
+                                    pass  # Keep ready_time as is
+                            else:
+                                good_readings_count = 0
+                                
+                                # Only lose green state if enough time has passed
+                                if is_currently_green and green_start_time:
+                                    time_green = time.time() - green_start_time
+                                    if time_green >= MIN_GREEN_TIME:
+                                        ready_time = None
+                                        green_start_time = None
+                                elif not is_currently_green:
                                     ready_time = None
                                     green_start_time = None
-                            elif not is_currently_green:
-                                ready_time = None
-                                green_start_time = None
-                    else:
+                        else:
+                            current_keywords = 0
+                            good_readings_count = 0
+                            ready_time = None
+                            green_start_time = None
+                            roi_enhancement_level = 1.0
+                            
+                    except Exception:
                         current_keywords = 0
                         good_readings_count = 0
                         ready_time = None
                         green_start_time = None
                         roi_enhancement_level = 1.0
-                        
-                except Exception:
-                    current_keywords = 0
-                    good_readings_count = 0
-                    ready_time = None
-                    green_start_time = None
-                    roi_enhancement_level = 1.0
-            
-            is_currently_green = ready_time is not None
-            keywords_needed = _get_adaptive_threshold(current_keywords, keyword_history, is_currently_green)
-            ready_to_capture = ready_time is not None
-            
-            # Show stability progress
-            stability_progress = min(100, (good_readings_count / STABILITY_FRAMES) * 100)
-            green_time = (time.time() - green_start_time) if green_start_time else 0
-            
-            # Auto capture after delay - enhance the captured frame based on final ROI enhancement
-            if ready_to_capture and (time.time() - ready_time) >= CAPTURE_DELAY:
-                # Apply the same enhancement level to the full frame for capture
-                if roi_enhancement_level > 1.2:
-                    captured_frame = cv2.convertScaleAbs(frame, alpha=roi_enhancement_level, beta=30)
-                else:
-                    captured_frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=20)
-                break
-            
-            # Determine colors and status with stability info
-            enhancement_info = f" (ROI: {roi_enhancement_level:.1f}x)" if roi_enhancement_level > 1.0 else ""
-            
-            if ready_to_capture:
-                box_color = (0, 255, 0)
-                remaining_delay = CAPTURE_DELAY - (time.time() - ready_time) if ready_time else CAPTURE_DELAY
-                green_duration = f" [Green: {green_time:.1f}s]" if green_time > 0 else ""
-                status_text = f"READY! Capturing in {remaining_delay:.1f}s... ({current_keywords}/{keywords_needed}){enhancement_info}{green_duration}"
-                status_color = (0, 255, 0)
-            elif good_readings_count > 0:
-                box_color = (0, 255, 255)
-                progress_text = f" [Stabilizing: {good_readings_count}/{STABILITY_FRAMES}]"
-                status_text = f"Stabilizing... Found {current_keywords}/{keywords_needed} keywords{enhancement_info}{progress_text}"
-                status_color = (0, 255, 255)
-            elif current_keywords >= max(1, keywords_needed - 1):
-                box_color = (0, 255, 255)
-                avg_text = f" [Avg: {sum(keyword_history)/len(keyword_history):.1f}]" if keyword_history else ""
-                status_text = f"Almost ready... Found {current_keywords}/{keywords_needed} keywords{enhancement_info}{avg_text}"
-                status_color = (0, 255, 255)
-            elif current_keywords >= 1:
-                box_color = (0, 165, 255)
-                status_text = f"License detected! Found {current_keywords}/{keywords_needed} keywords{enhancement_info}"
-                status_color = (0, 165, 255)
-            else:
-                box_color = (0, 0, 255)
-                status_text = f"Position license in box... ({current_keywords} keywords){enhancement_info}"
-                status_color = (255, 255, 255)
-            
-            # Draw UI elements with ROI enhancement visualization
-            # Make box color intensity reflect ROI enhancement level
-            if roi_enhancement_level > 1.5:
-                box_thickness = 4  # Thicker box for high enhancement
-            else:
-                box_thickness = 3
                 
-            cv2.rectangle(display_frame, (box_x1, box_y1), (box_x2, box_y2), box_color, box_thickness)
-            
-            # Optional: Show enhanced ROI preview in corner when enhancement is active
-            if roi_enhancement_level > 1.2 and frame_count % KEYWORD_CHECK_INTERVAL == 0:
-                try:
-                    orig_box_x1, orig_box_y1 = int(box_x1 / scale), int(box_y1 / scale)
-                    orig_box_x2, orig_box_y2 = int(box_x2 / scale), int(box_y2 / scale)
-                    roi_preview = brightened[orig_box_y1:orig_box_y2, orig_box_x1:orig_box_x2]
-                    enhanced_preview, _ = _enhance_roi_only(roi_preview, current_keywords)
-                    
-                    # Resize preview and place in corner
-                    preview_h, preview_w = enhanced_preview.shape[:2]
-                    preview_scale = min(150 / preview_w, 100 / preview_h)
-                    preview_resized = cv2.resize(enhanced_preview, (int(preview_w * preview_scale), int(preview_h * preview_scale)))
-                    
-                    # Place in top-right corner
-                    y1, y2 = 10, 10 + preview_resized.shape[0]
-                    x1, x2 = new_w - preview_resized.shape[1] - 10, new_w - 10
-                    
-                    if y2 < new_h and x1 > 0:
-                        display_frame[y1:y2, x1:x2] = preview_resized
-                        cv2.rectangle(display_frame, (x1-1, y1-1), (x2+1, y2+1), (0, 255, 255), 1)
-                        cv2.putText(display_frame, "Enhanced", (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 255, 255), 1)
-                except:
-                    pass
-            
-            camera_status = "RETAKE MODE" if retry_mode else "License Capture [ROI Focus]"
-            cv2.putText(display_frame, camera_status, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255) if retry_mode else (0, 255, 0), 2)
-            
-            if reference_name:
-                cv2.putText(display_frame, f"Target: {reference_name}", (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            
-            cv2.putText(display_frame, status_text, (10, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color, 1)
-            cv2.putText(display_frame, "Auto-capture | 's' = manual | 'q' = quit", (10, new_h-10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
-            
-            # Progress bar with stability and ROI enhancement indicator
-            if current_keywords >= 0:
-                # Show stability progress if working towards green
-                if good_readings_count > 0 and not ready_to_capture:
-                    progress_width = int((good_readings_count / STABILITY_FRAMES) * 200)
-                    progress_color = (0, 255, 255)  # Cyan for stability progress
-                    progress_text = f"Stabilizing: {good_readings_count}/{STABILITY_FRAMES} | ROI: {roi_enhancement_level:.1f}x"
-                else:
-                    # Normal keyword progress
-                    progress_width = int((current_keywords / max(keywords_needed, 1)) * 200)
-                    
-                    # Color based on enhancement level and state
-                    if ready_to_capture:
-                        progress_color = (0, 255, 0)  # Green when ready
-                    elif roi_enhancement_level >= 1.8:
-                        progress_color = (0, 100, 255)  # Orange for high enhancement
-                    elif roi_enhancement_level >= 1.4:
-                        progress_color = (0, 200, 255)  # Yellow for medium enhancement
+                is_currently_green = ready_time is not None
+                keywords_needed = _get_adaptive_threshold(current_keywords, keyword_history, is_currently_green)
+                ready_to_capture = ready_time is not None
+                
+                # Show stability progress
+                stability_progress = min(100, (good_readings_count / STABILITY_FRAMES) * 100)
+                green_time = (time.time() - green_start_time) if green_start_time else 0
+                
+                # Auto capture after delay - enhance the captured frame based on final ROI enhancement
+                if ready_to_capture and (time.time() - ready_time) >= CAPTURE_DELAY:
+                    # Apply the same enhancement level to the full frame for capture
+                    if roi_enhancement_level > 1.2:
+                        captured_frame = cv2.convertScaleAbs(frame, alpha=roi_enhancement_level, beta=30)
                     else:
-                        progress_color = box_color
-                    
-                    if ready_to_capture:
-                        progress_text = f"READY! Keywords: {current_keywords}/{keywords_needed} | Green Time: {green_time:.1f}s"
-                    else:
-                        avg_text = f" | Avg: {sum(keyword_history)/len(keyword_history):.1f}" if keyword_history else ""
-                        progress_text = f"Keywords: {current_keywords}/{keywords_needed} | ROI: {roi_enhancement_level:.1f}x{avg_text}"
-                    
-                cv2.rectangle(display_frame, (10, new_h-40), (210, new_h-25), (50, 50, 50), -1)
-                cv2.rectangle(display_frame, (10, new_h-40), (10 + progress_width, new_h-25), progress_color, -1)
-                cv2.putText(display_frame, progress_text, (10, new_h-45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-            
-            # Countdown
-            if ready_to_capture and ready_time:
-                remaining = CAPTURE_DELAY - (time.time() - ready_time)
-                if remaining > 0:
-                    countdown_text = f"{remaining:.1f}"
-                    text_size = cv2.getTextSize(countdown_text, cv2.FONT_HERSHEY_SIMPLEX, 2, 3)[0]
-                    text_x = (new_w - text_size[0]) // 2
-                    text_y = (new_h + text_size[1]) // 2
-                    cv2.putText(display_frame, countdown_text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 3)
-            
-            cv2.imshow("MotorPass - License Capture", display_frame)
-            
-            key = cv2.waitKey(30) & 0xFF
-            if key == ord("q"):
-                break
-            elif key == ord("s"):
-                # Manual capture with current enhancement level
-                if roi_enhancement_level > 1.2:
-                    captured_frame = cv2.convertScaleAbs(frame, alpha=roi_enhancement_level, beta=30)
+                        captured_frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=20)
+                    break
+                
+                # Determine colors and status with stability info
+                enhancement_info = f" (ROI: {roi_enhancement_level:.1f}x)" if roi_enhancement_level > 1.0 else ""
+                
+                if ready_to_capture:
+                    box_color = (0, 255, 0)
+                    remaining_delay = CAPTURE_DELAY - (time.time() - ready_time) if ready_time else CAPTURE_DELAY
+                    green_duration = f" [Green: {green_time:.1f}s]" if green_time > 0 else ""
+                    status_text = f"READY! Capturing in {remaining_delay:.1f}s... ({current_keywords}/{keywords_needed}){enhancement_info}{green_duration}"
+                    status_color = (0, 255, 0)
+                elif good_readings_count > 0:
+                    box_color = (0, 255, 255)
+                    progress_text = f" [Stabilizing: {good_readings_count}/{STABILITY_FRAMES}]"
+                    status_text = f"Stabilizing... Found {current_keywords}/{keywords_needed} keywords{enhancement_info}{progress_text}"
+                    status_color = (0, 255, 255)
+                elif current_keywords >= max(1, keywords_needed - 1):
+                    box_color = (0, 255, 255)
+                    avg_text = f" [Avg: {sum(keyword_history)/len(keyword_history):.1f}]" if keyword_history else ""
+                    status_text = f"Almost ready... Found {current_keywords}/{keywords_needed} keywords{enhancement_info}{avg_text}"
+                    status_color = (0, 255, 255)
+                elif current_keywords >= 1:
+                    box_color = (0, 165, 255)
+                    status_text = f"License detected! Found {current_keywords}/{keywords_needed} keywords{enhancement_info}"
+                    status_color = (0, 165, 255)
                 else:
-                    captured_frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=20)
-                break
+                    box_color = (0, 0, 255)
+                    status_text = f"Position license in box... ({current_keywords} keywords){enhancement_info}"
+                    status_color = (255, 255, 255)
+                
+                # Draw UI elements with ROI enhancement visualization
+                # Make box color intensity reflect ROI enhancement level
+                if roi_enhancement_level > 1.5:
+                    box_thickness = 4  # Thicker box for high enhancement
+                else:
+                    box_thickness = 3
+                    
+                cv2.rectangle(display_frame, (box_x1, box_y1), (box_x2, box_y2), box_color, box_thickness)
+                
+                # Optional: Show enhanced ROI preview in corner when enhancement is active
+                if roi_enhancement_level > 1.2 and frame_count % KEYWORD_CHECK_INTERVAL == 0:
+                    try:
+                        orig_box_x1, orig_box_y1 = int(box_x1 / scale), int(box_y1 / scale)
+                        orig_box_x2, orig_box_y2 = int(box_x2 / scale), int(box_y2 / scale)
+                        roi_preview = brightened[orig_box_y1:orig_box_y2, orig_box_x1:orig_box_x2]
+                        enhanced_preview, _ = _enhance_roi_only(roi_preview, current_keywords)
+                        
+                        # Resize preview and place in corner
+                        preview_h, preview_w = enhanced_preview.shape[:2]
+                        preview_scale = min(150 / preview_w, 100 / preview_h)
+                        preview_resized = cv2.resize(enhanced_preview, (int(preview_w * preview_scale), int(preview_h * preview_scale)))
+                        
+                        # Place in top-right corner
+                        y1, y2 = 10, 10 + preview_resized.shape[0]
+                        x1, x2 = new_w - preview_resized.shape[1] - 10, new_w - 10
+                        
+                        if y2 < new_h and x1 > 0:
+                            display_frame[y1:y2, x1:x2] = preview_resized
+                            cv2.rectangle(display_frame, (x1-1, y1-1), (x2+1, y2+1), (0, 255, 255), 1)
+                            cv2.putText(display_frame, "Enhanced", (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 255, 255), 1)
+                    except:
+                        pass
+                
+                camera_status = "RETAKE MODE" if retry_mode else "License Capture [ROI Focus]"
+                cv2.putText(display_frame, camera_status, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255) if retry_mode else (0, 255, 0), 2)
+                
+                if reference_name:
+                    cv2.putText(display_frame, f"Target: {reference_name}", (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                
+                cv2.putText(display_frame, status_text, (10, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color, 1)
+                cv2.putText(display_frame, "'s' = manual capture | 'q' = quit", (10, new_h-10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+                
+                # Progress bar with stability and ROI enhancement indicator
+                if current_keywords >= 0:
+                    # Show stability progress if working towards green
+                    if good_readings_count > 0 and not ready_to_capture:
+                        progress_width = int((good_readings_count / STABILITY_FRAMES) * 200)
+                        progress_color = (0, 255, 255)  # Cyan for stability progress
+                        progress_text = f"Stabilizing: {good_readings_count}/{STABILITY_FRAMES} | ROI: {roi_enhancement_level:.1f}x"
+                    else:
+                        # Normal keyword progress
+                        progress_width = int((current_keywords / max(keywords_needed, 1)) * 200)
+                        
+                        # Color based on enhancement level and state
+                        if ready_to_capture:
+                            progress_color = (0, 255, 0)  # Green when ready
+                        elif roi_enhancement_level >= 1.8:
+                            progress_color = (0, 100, 255)  # Orange for high enhancement
+                        elif roi_enhancement_level >= 1.4:
+                            progress_color = (0, 200, 255)  # Yellow for medium enhancement
+                        else:
+                            progress_color = box_color
+                        
+                        if ready_to_capture:
+                            progress_text = f"READY! Keywords: {current_keywords}/{keywords_needed} | Green Time: {green_time:.1f}s"
+                        else:
+                            avg_text = f" | Avg: {sum(keyword_history)/len(keyword_history):.1f}" if keyword_history else ""
+                            progress_text = f"Keywords: {current_keywords}/{keywords_needed} | ROI: {roi_enhancement_level:.1f}x{avg_text}"
+                        
+                    cv2.rectangle(display_frame, (10, new_h-40), (210, new_h-25), (50, 50, 50), -1)
+                    cv2.rectangle(display_frame, (10, new_h-40), (10 + progress_width, new_h-25), progress_color, -1)
+                    cv2.putText(display_frame, progress_text, (10, new_h-45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+                
+                # Countdown
+                if ready_to_capture and ready_time:
+                    remaining = CAPTURE_DELAY - (time.time() - ready_time)
+                    if remaining > 0:
+                        countdown_text = f"{remaining:.1f}"
+                        text_size = cv2.getTextSize(countdown_text, cv2.FONT_HERSHEY_SIMPLEX, 2, 3)[0]
+                        text_x = (new_w - text_size[0]) // 2
+                        text_y = (new_h + text_size[1]) // 2
+                        cv2.putText(display_frame, countdown_text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 3)
+                
+                cv2.imshow("MotorPass - License Capture", display_frame)
+                
+                key = cv2.waitKey(30) & 0xFF
+                if key == ord("q"):
+                    break
+                elif key == ord("s"):
+                    # Manual capture with current enhancement level
+                    if roi_enhancement_level > 1.2:
+                        captured_frame = cv2.convertScaleAbs(frame, alpha=roi_enhancement_level, beta=30)
+                    else:
+                        captured_frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=20)
+                    break
         
-        cv2.destroyAllWindows()
-        
+        # Save captured frame if we got one
         if captured_frame is not None:
             optimized_frame = _resize_image_optimal(captured_frame)
             cv2.imwrite(temp_filename, optimized_frame)
+            print("✅ License image captured successfully")
             return temp_filename
         else:
             safe_delete_temp_file(temp_filename)
             return None
             
-    except Exception:
-        cv2.destroyAllWindows()
+    except Exception as e:
+        print(f"❌ Error during license capture: {e}")
         safe_delete_temp_file(temp_filename)
         return None
-
+        
+    finally:
+        # Ensure cleanup
+        try:
+            cv2.destroyWindow("MotorPass - License Capture")
+            cv2.destroyAllWindows()
+            cv2.waitKey(1)
+        except:
+            pass
+        
+        # Force final cleanup
+        force_camera_cleanup()
+              
 # ============== VERIFICATION FUNCTIONS ==============
 
 def licenseRead(image_path: str, fingerprint_info: dict) -> NameInfo:

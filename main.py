@@ -1,4 +1,4 @@
-# main.py - MotorPass GUI Application
+# main.py - MotorPass GUI Application with proper cleanup
 import os
 import sqlite3
 from ui.main_window import MotorPassGUI
@@ -17,6 +17,7 @@ from services.led_control import (
     set_led_idle, 
     cleanup_led_system
 )
+from services.rpi_camera import force_camera_cleanup
 from database.db_operations import initialize_all_databases
 
 def initialize_system():
@@ -27,6 +28,14 @@ def initialize_system():
     # Initialize LED system
     led_ok = init_led_system(red_pin=18, green_pin=16)
     print(f"💡 LED System: {'✅' if led_ok else '❌'}")
+    
+    # Initialize camera once at startup
+    try:
+        from services.startup_init import initialize_camera_at_startup
+        camera_ok = initialize_camera_at_startup()
+        print(f"📷 Camera System: {'✅' if camera_ok else '❌'}")
+    except Exception as e:
+        print(f"📷 Camera System: ❌ ({e})")
     
     # Initialize all databases
     db_ok = initialize_all_databases()
@@ -43,6 +52,11 @@ def cleanup_system():
     try:
         print("\n🧹 Cleaning up system resources...")
         cleanup_led_system()
+        
+        # Only cleanup OpenCV windows, not camera
+        from services.rpi_camera import force_camera_cleanup
+        force_camera_cleanup()
+        
         print("✅ Cleanup complete")
     except Exception as e:
         print(f"⚠️ Cleanup error: {e}")

@@ -113,7 +113,7 @@ def initialize_all_databases():
         conn.close()
         
         # Backup Database
-        backup_databases()
+        # backup_databases()
         
         print("✅ MotorPass database initialized successfully")
         return True
@@ -125,6 +125,7 @@ def initialize_all_databases():
 
 # =================== BACKUP AND MAINTENANCE ===================
 
+'''
 def backup_databases(backup_dir: str = "backups") -> bool:
     """Create backup of the database"""
     try:
@@ -145,6 +146,7 @@ def backup_databases(backup_dir: str = "backups") -> bool:
     except Exception as e:
         print(f"❌ Backup error: {e}")
         return False
+'''
 
 def verify_database_integrity() -> bool:
     """Verify database integrity"""

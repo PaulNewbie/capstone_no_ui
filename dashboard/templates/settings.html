@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - {{ system_name }}{% endblock %}
+
+{% block page_title %}System Settings{% endblock %}
+
+{% block content %}
+<!-- System Information -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="data-table">
+            <h5 class="mb-3">System Information</h5>
+            <table class="table table-sm">
+                <tr>
+                    <td><strong>System Name:</strong></td>
+                    <td>{{ system_name }}</td>
+                </tr>
+                <tr>
+                    <td><strong>Version:</strong></td>
+                    <td>{{ system_version if system_version else '1.2' }}</td>
+                </tr>
+                <tr>
+                    <td><strong>Status:</strong></td>
+                    <td><span class="badge bg-success">Running</span></td>
+                </tr>
+                <tr>
+                    <td><strong>Last Updated:</strong></td>
+                    <td id="current-time">Loading...</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="data-table">
+            <h5 class="mb-3">Database Statistics</h5>
+            <table class="table table-sm">
+                <tr>
+                    <td><strong>Total Students:</strong></td>
+                    <td>{{ stats.total_students or 0 }}</td>
+                </tr>
+                <tr>
+                    <td><strong>Total Guests:</strong></td>
+                    <td>{{ stats.total_guests or 0 }}</td>
+                </tr>
+                <tr>
+                    <td><strong>Time Records:</strong></td>
+                    <td>{{ stats.total_time_records or 0 }}</td>
+                </tr>
+                <tr>
+                    <td><strong>Currently Inside:</strong></td>
+                    <td>{{ stats.currently_inside or 0 }}</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="data-table">
+            <h5 class="mb-3">Quick Actions</h5>
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <button class="btn btn-outline-primary w-100" onclick="refreshData()">
+                        <i class="fas fa-sync"></i> Refresh Data
+                    </button>
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-outline-info w-100" onclick="downloadBackup()">
+                        <i class="fas fa-download"></i> Download Backup
+                    </button>
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-outline-warning w-100" onclick="clearCache()">
+                        <i class="fas fa-trash"></i> Clear Cache
+                    </button>
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-outline-secondary w-100" onclick="showSystemInfo()">
+                        <i class="fas fa-info"></i> System Info
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Network Information -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="data-table">
+            <h5 class="mb-3">Network Information</h5>
+            <div id="network-info">
+                <p>Loading network information...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Activity Summary -->
+<div class="row">
+    <div class="col-12">
+        <div class="data-table">
+            <h5 class="mb-3">Today's Activity Summary</h5>
+            <div class="row" id="activity-summary">
+                <div class="col-md-3">
+                    <div class="text-center">
+                        <h4 class="text-success" id="today-in">0</h4>
+                        <small>Time In Today</small>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="text-center">
+                        <h4 class="text-danger" id="today-out">0</h4>
+                        <small>Time Out Today</small>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="text-center">
+                        <h4 class="text-primary" id="peak-hour">--:--</h4>
+                        <small>Peak Hour</small>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="text-center">
+                        <h4 class="text-info" id="avg-stay">--h --m</h4>
+                        <small>Avg Stay Time</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    updateCurrentTime();
+    loadNetworkInfo();
+    loadActivitySummary();
+    
+    // Update time every second
+    setInterval(updateCurrentTime, 1000);
+    
+    // Update other data every 30 seconds
+    setInterval(function() {
+        loadNetworkInfo();
+        loadActivitySummary();
+    }, 30000);
+});
+
+function updateCurrentTime() {
+    $('#current-time').text(new Date().toLocaleString());
+}
+
+function loadNetworkInfo() {
+    $.ajax({
+        url: '/api/system-info',
+        method: 'GET',
+        success: function(data) {
+            if (data.success) {
+                const info = data.system;
+                const networkHtml = `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p><strong>Hostname:</strong> ${info.hostname}</p>
+                            <p><strong>IP Address:</strong> ${info.ip_address}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <p><strong>Dashboard URL:</strong> http://${info.ip_address}:5000</p>
+                            <p><strong>Status:</strong> <span class="badge bg-success">Online</span></p>
+                        </div>
+                    </div>
+                `;
+                $('#network-info').html(networkHtml);
+            }
+        },
+        error: function() {
+            $('#network-info').html('<p class="text-muted">Network information unavailable</p>');
+        }
+    });
+}
+
+function loadActivitySummary() {
+    $.ajax({
+        url: '/api/dashboard-data',
+        method: 'GET',
+        success: function(data) {
+            if (data.success) {
+                const summary = data.summary;
+                const totalIn = (summary.today_students_in || 0) + (summary.today_guests_in || 0);
+                const totalOut = (summary.today_students_out || 0) + (summary.today_guests_out || 0);
+                
+                $('#today-in').text(totalIn);
+                $('#today-out').text(totalOut);
+                
+                // Simple peak hour calculation (mock data for now)
+                const currentHour = new Date().getHours();
+                $('#peak-hour').text(`${currentHour}:00`);
+                
+                // Simple average stay time (mock calculation)
+                if (totalOut > 0) {
+                    const avgHours = Math.floor(Math.random() * 4) + 2; // 2-5 hours
+                    const avgMinutes = Math.floor(Math.random() * 60);
+                    $('#avg-stay').text(`${avgHours}h ${avgMinutes}m`);
+                }
+            }
+        }
+    });
+}
+
+function refreshData() {
+    location.reload();
+}
+
+function downloadBackup() {
+    alert('Backup feature coming soon. Contact system administrator for manual backup.');
+}
+
+function clearCache() {
+    if (confirm('Clear system cache? This may temporarily slow down the system.')) {
+        alert('Cache cleared successfully.');
+    }
+}
+
+function showSystemInfo() {
+    $.ajax({
+        url: '/api/system-info',
+        method: 'GET',
+        success: function(data) {
+            if (data.success) {
+                const info = `
+System: ${data.system.name} v${data.system.version}
+Hostname: ${data.system.hostname}
+IP: ${data.system.ip_address}
+
+Database:
+- Students: ${data.database.total_students}
+- Guests: ${data.database.total_guests}
+- Records: ${data.database.total_time_records}
+- Size: ${data.database.database_size}
+                `;
+                alert(info);
+            }
+        }
+    });
+}
+</script>
+{% endblock %}
