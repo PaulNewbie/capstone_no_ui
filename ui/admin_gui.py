@@ -495,9 +495,11 @@ class AdminPanelGUI:
             if function_name in messages:
                 title, msg = messages[function_name]
                 self.root.after(0, lambda: messagebox.showinfo(title, msg, icon='info'))
+            pass
                 
         except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror("❌ Error", f"Operation failed:\n\n{str(e)}"))
+            error_message = str(e)
+            self.root.after(0, lambda: messagebox.showerror("❌ Error", f"Operation failed:\n\n{str(error_message)}"))
     
     def close(self):
         """Close the GUI"""
