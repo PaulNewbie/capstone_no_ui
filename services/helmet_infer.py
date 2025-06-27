@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 import time
-from services.rpi_camera import get_camera, force_camera_cleanup, CameraContext
+from services.rpi_camera import force_camera_cleanup, CameraContext
 
 # === Helmet Detection Config ===
 MODEL_PATH = "best.onnx"
@@ -72,7 +72,7 @@ def postprocess_helmet(predictions, scale, orig_size):
     return result
 
 def verify_helmet():
-    """Verify full-face helmet using RPi Camera with guaranteed cleanup"""
+    """Verify full-face helmet using RPi Camera with smart cleanup"""
     if session is None:
         print("❌ Helmet detection model not loaded")
         return False
@@ -82,7 +82,7 @@ def verify_helmet():
     print(f"📷 Using RPi Camera for {HELMET_DETECTION_DURATION} seconds...")
     print("📱 Press 'q' or ESC to cancel verification")
     
-    # Force cleanup before starting
+    # Smart cleanup - only cleans if needed
     force_camera_cleanup()
     
     result = False
@@ -213,7 +213,5 @@ def verify_helmet():
         except:
             pass
     
-    # Final cleanup after context manager
-    force_camera_cleanup()
-    
+    # Context manager handles cleanup automatically
     return result

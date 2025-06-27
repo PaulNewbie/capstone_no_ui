@@ -20,3 +20,7 @@ __pycache__/
 *cache
 cache
 cache/ocr
+
+*database
+*motorpass.db
+database/motorpass.db

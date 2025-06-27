@@ -25,7 +25,7 @@ def initialize_system():
     print(f"🚗 {SYSTEM_NAME} System Initialization")
     print("="*50)
     
-    # Force camera cleanup at startup
+    # Smart cleanup at startup - will only clean if needed
     force_camera_cleanup()
     
     # Initialize LED system

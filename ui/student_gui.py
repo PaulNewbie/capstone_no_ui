@@ -6,6 +6,7 @@ import threading
 from datetime import datetime
 import os
 from PIL import Image, ImageTk
+from typing import Dict
 
 class StudentVerificationGUI:
     def __init__(self, verification_function):

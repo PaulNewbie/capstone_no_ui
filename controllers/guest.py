@@ -27,18 +27,14 @@ def guest_verification():
     # Import GUI here to avoid circular imports
     from ui.guest_gui import GuestVerificationGUI
     
-    # Force cleanup before starting
-    force_camera_cleanup()
+    # No cleanup needed at start
     
     # Create and run GUI
     gui = GuestVerificationGUI(run_guest_verification_with_gui)
     gui.run()
-    
-    # Final cleanup after GUI closes
-    force_camera_cleanup()
 
 def run_guest_verification_with_gui(status_callback):
-    """Run guest verification steps with GUI status updates"""
+    """Run guest verification steps with GUI status updates - Smart cleanup"""
     
     # Initialize systems
     init_buzzer()
@@ -54,9 +50,7 @@ def run_guest_verification_with_gui(status_callback):
         print("🪖 HELMET VERIFICATION (Terminal Camera)")
         print("="*60)
         
-        # Ensure camera is clean before helmet check
-        force_camera_cleanup()
-        
+        # No cleanup needed - helmet verification handles it internally
         if verify_helmet():
             status_callback({'helmet_status': 'VERIFIED'})
             status_callback({'current_step': '✅ Helmet verified successfully!'})
@@ -67,12 +61,8 @@ def run_guest_verification_with_gui(status_callback):
             set_led_idle()
             play_failure()
             cleanup_buzzer()
-            force_camera_cleanup()
+            # No camera cleanup needed
             return {'verified': False, 'reason': 'Helmet verification failed'}
-        
-        # Ensure camera is cleaned up after helmet check
-        force_camera_cleanup()
-        time.sleep(0.5)  # Brief pause to ensure cleanup
         
         # Step 2: License capture
         status_callback({'current_step': '📄 Capturing license... (Check terminal for camera)'})
@@ -82,10 +72,7 @@ def run_guest_verification_with_gui(status_callback):
         print("📄 LICENSE CAPTURE (Terminal Camera)")
         print("="*60)
         
-        # Force cleanup before license capture
-        force_camera_cleanup()
-        time.sleep(0.5)  # Brief pause
-        
+        # No cleanup before license capture - smart cleanup handles it
         image_path = auto_capture_license_rpi()
         
         if not image_path:
@@ -94,7 +81,7 @@ def run_guest_verification_with_gui(status_callback):
             set_led_idle()
             play_failure()
             cleanup_buzzer()
-            force_camera_cleanup()
+            # No camera cleanup needed
             return {'verified': False, 'reason': 'License capture failed'}
         
         status_callback({'license_status': 'DETECTED'})
@@ -118,93 +105,23 @@ def run_guest_verification_with_gui(status_callback):
                     'guest_number': guest_info['guest_number'],
                     'plate_number': guest_info['plate_number'],
                     'office': guest_info['office'],
-                    'status': 'RETURNING GUEST - TIMING OUT'
+                    'status': 'GUEST TIME OUT'
                 }
             })
-            
-            status_callback({'current_step': '🔴 Processing TIME OUT...'})
-            
-            time_result = process_guest_time_out(guest_info)
-            
-            if time_result['success']:
-                timestamp = time.strftime('%H:%M:%S')
-                status_callback({'current_step': f'✅ TIME OUT recorded at {timestamp}'})
-                set_led_success(duration=5.0)
-                play_success()
-                
-                # Show verification summary
-                status_callback({
-                    'verification_summary': {
-                        'helmet': True,
-                        'license': True
-                    }
-                })
-                
-                result = {
-                    'verified': True,
-                    'name': guest_info['name'],
-                    'time_action': 'OUT',
-                    'timestamp': timestamp,
-                    'office': guest_info.get('office', 'N/A')
-                }
-            else:
-                status_callback({'current_step': '❌ Failed to record TIME OUT'})
-                set_led_idle()
-                play_failure()
-                result = {'verified': False, 'reason': 'Failed to record TIME OUT'}
-                
-        elif current_status == 'OUT' and guest_info is not None:
-            # Returning guest TIME IN
-            status_callback({
-                'guest_info': {
-                    'name': guest_info['name'],
-                    'guest_number': guest_info['guest_number'],
-                    'plate_number': guest_info['plate_number'],
-                    'office': guest_info.get('office', 'Previous Visit'),
-                    'status': 'RETURNING GUEST - TIMING IN'
-                }
-            })
-            
-            status_callback({'current_step': '📝 Updating guest information...'})
-            
-            # Get updated office info (using GUI dialog)
-            updated_guest_info = updated_guest_office_gui(guest_info['name'], guest_info.get('office', 'CSS Office'))
-            
-            if not updated_guest_info:
-                status_callback({'current_step': '❌ Guest registration cancelled'})
-                set_led_idle()
-                play_failure()
-                cleanup_buzzer()
-                force_camera_cleanup()
-                return {'verified': False, 'reason': 'Guest registration cancelled'}
-            
-            existing_guest_info = {
-                'name': updated_guest_info['name'],
-                'plate_number': guest_info['plate_number'],
-                'office': updated_guest_info['office']
-            }
             
             # Verify guest
-            guest_data_for_license = {
-                'name': existing_guest_info['name'],
-                'plate_number': existing_guest_info['plate_number'],
-                'office': existing_guest_info['office'],
-                'is_guest': True
-            }
-            
             is_guest_verified = complete_guest_verification_flow(
                 image_path=image_path,
-                guest_info=guest_data_for_license,
+                guest_info=guest_info,
                 helmet_verified=True
             )
             
             if is_guest_verified:
-                store_guest_in_database(existing_guest_info)
-                time_result = process_guest_time_in(existing_guest_info)
+                time_result = process_guest_time_out(guest_info)
                 
                 if time_result['success']:
                     timestamp = time.strftime('%H:%M:%S')
-                    status_callback({'current_step': f'✅ TIME IN recorded at {timestamp}'})
+                    status_callback({'current_step': f'✅ TIME OUT recorded at {timestamp}'})
                     set_led_success(duration=5.0)
                     play_success()
                     
@@ -218,16 +135,16 @@ def run_guest_verification_with_gui(status_callback):
                     
                     result = {
                         'verified': True,
-                        'name': existing_guest_info['name'],
-                        'time_action': 'IN',
+                        'name': guest_info['name'],
+                        'time_action': 'OUT',
                         'timestamp': timestamp,
-                        'office': existing_guest_info['office']
+                        'guest_number': guest_info['guest_number']
                     }
                 else:
-                    status_callback({'current_step': '❌ Failed to record TIME IN'})
+                    status_callback({'current_step': '❌ Failed to record TIME OUT'})
                     set_led_idle()
                     play_failure()
-                    result = {'verified': False, 'reason': 'Failed to record TIME IN'}
+                    result = {'verified': False, 'reason': 'Failed to record TIME OUT'}
             else:
                 status_callback({'current_step': '❌ Guest verification failed'})
                 set_led_idle()
@@ -253,7 +170,7 @@ def run_guest_verification_with_gui(status_callback):
                 set_led_idle()
                 play_failure()
                 cleanup_buzzer()
-                force_camera_cleanup()
+                # No camera cleanup needed
                 return {'verified': False, 'reason': 'Guest registration cancelled'}
             
             # Update guest info display
@@ -317,7 +234,6 @@ def run_guest_verification_with_gui(status_callback):
                 result = {'verified': False, 'reason': 'License verification failed'}
         
         cleanup_buzzer()
-        force_camera_cleanup()
         return result
         
     except Exception as e:
@@ -325,9 +241,8 @@ def run_guest_verification_with_gui(status_callback):
         set_led_idle()
         play_failure()
         cleanup_buzzer()
-        force_camera_cleanup()
         return {'verified': False, 'reason': str(e)}
-
+        
 def store_guest_in_database(guest_info):
     """Store or update guest information in the guests table"""
     try:
