@@ -1,6 +1,9 @@
 # main.py - MotorPass GUI Application with proper cleanup
 import os
+import sys
 import sqlite3
+import subprocess
+import time
 from ui.main_window import MotorPassGUI
 
 # Import controllers
@@ -19,6 +22,9 @@ from services.led_control import (
 )
 from services.rpi_camera import force_camera_cleanup
 from database.db_operations import initialize_all_databases
+
+# Global flag to track if restart is needed
+RESTART_AFTER_TRANSACTION = False
 
 def initialize_system():
     """Initialize system components"""
@@ -52,6 +58,110 @@ def cleanup_system():
     except Exception as e:
         print(f"⚠️ Cleanup error: {e}")
 
+def restart_application():
+    """Restart the entire application"""
+    print("\n🔄 Restarting application for fresh camera state...")
+    
+    # Clean up current resources
+    cleanup_system()
+    
+    # Small delay to ensure cleanup
+    time.sleep(1)
+    
+    # Get the current script path
+    script_path = os.path.abspath(__file__)
+    python_executable = sys.executable
+    
+    # Start new instance
+    print("🚀 Starting new instance...")
+    subprocess.Popen([python_executable, script_path])
+    
+    # Exit current instance
+    sys.exit(0)
+
+def student_verification_wrapper():
+    """Wrapper for student verification with auto-restart"""
+    global RESTART_AFTER_TRANSACTION
+    
+    try:
+        # Run original student verification
+        result = student_verification()
+        
+        # Set restart flag
+        RESTART_AFTER_TRANSACTION = True
+        
+        return result
+        
+    except Exception as e:
+        print(f"❌ Student verification error: {e}")
+        RESTART_AFTER_TRANSACTION = True
+        raise
+
+def guest_verification_wrapper():
+    """Wrapper for guest verification with auto-restart"""
+    global RESTART_AFTER_TRANSACTION
+    
+    try:
+        # Run original guest verification
+        result = guest_verification()
+        
+        # Set restart flag
+        RESTART_AFTER_TRANSACTION = True
+        
+        return result
+        
+    except Exception as e:
+        print(f"❌ Guest verification error: {e}")
+        RESTART_AFTER_TRANSACTION = True
+        raise
+
+def admin_panel_wrapper():
+    """Wrapper for admin panel - no restart needed"""
+    return admin_panel()
+
+def main_loop():
+    """Main application loop with restart logic"""
+    global RESTART_AFTER_TRANSACTION
+    
+    while True:
+        RESTART_AFTER_TRANSACTION = False
+        
+        try:
+            # Create and run GUI using the separate UI class
+            app = MotorPassGUI(
+                system_name=SYSTEM_NAME,
+                system_version=SYSTEM_VERSION,
+                admin_function=admin_panel_wrapper,
+                student_function=student_verification_wrapper,
+                guest_function=guest_verification_wrapper
+            )
+            
+            # Run the GUI
+            app.run()
+            
+            # Check if restart is needed
+            if RESTART_AFTER_TRANSACTION:
+                print("\n🔄 Transaction completed - restarting for fresh camera state...")
+                restart_application()
+            else:
+                # Normal exit
+                break
+                
+        except KeyboardInterrupt:
+            print("\n\n⚠️ System interrupted by user")
+            break
+        except Exception as e:
+            print(f"❌ GUI Error: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Check if restart is needed even after error
+            if RESTART_AFTER_TRANSACTION:
+                print("\n🔄 Error occurred after transaction - restarting...")
+                restart_application()
+            else:
+                break
+
 if __name__ == "__main__":
     print(f"🚗 {SYSTEM_NAME} v{SYSTEM_VERSION}")
     print("="*50)
@@ -61,22 +171,9 @@ if __name__ == "__main__":
         print("🖥️ Starting GUI interface...")
         
         try:
-            # Create and run GUI using the separate UI class
-            app = MotorPassGUI(
-                system_name=SYSTEM_NAME,
-                system_version=SYSTEM_VERSION,
-                admin_function=admin_panel,
-                student_function=student_verification,
-                guest_function=guest_verification
-            )
-            app.run()
+            # Start main loop with restart logic
+            main_loop()
             
-        except KeyboardInterrupt:
-            print("\n\n⚠️ System interrupted by user")
-        except Exception as e:
-            print(f"❌ GUI Error: {e}")
-            import traceback
-            traceback.print_exc()
         finally:
             cleanup_system()
     else:

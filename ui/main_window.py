@@ -3,6 +3,8 @@
 import tkinter as tk
 from tkinter import messagebox
 import os
+import sys
+import subprocess
 import sqlite3
 from PIL import Image, ImageTk
 from datetime import datetime
@@ -16,6 +18,9 @@ class MotorPassGUI:
         self.admin_function = admin_function
         self.student_function = student_function
         self.guest_function = guest_function
+        
+        # ADD ONLY THIS LINE - restart tracking
+        self._restart_needed = False
         
         self.root = tk.Tk()
         self.root.title(f"{system_name} System v{system_version}")
@@ -120,52 +125,64 @@ class MotorPassGUI:
         logo_frame.pack_propagate(False)
         
         # Try to load logo
-        logo_path = "assets/logo.png"
-        if os.path.exists(logo_path):
-            try:
-                logo_img = Image.open(logo_path)
-                logo_img = logo_img.resize((90, 80), Image.Resampling.LANCZOS)
-                self.logo_image = ImageTk.PhotoImage(logo_img)
-                
-                logo_label = tk.Label(logo_frame, image=self.logo_image, bg='#46230a')
-                logo_label.place(relx=0.5, rely=0.5, anchor="center")
-            except:
-                # Fallback text logo
-                logo_text = tk.Label(logo_frame, text="MP", font=("Arial", 20, "bold"), 
-                                   fg="#46230a", bg="#DAA520")
-                logo_text.place(relx=0.5, rely=0.5, anchor="center")
-        else:
-            logo_text = tk.Label(logo_frame, text="MP", font=("Arial", 20, "bold"), 
-                               fg="#8B4513", bg="#DAA520")
+        logo_loaded = False
+        logo_paths = ["assets/logo.png", "logo.png", "../assets/logo.png"]
+        
+        for logo_path in logo_paths:
+            if os.path.exists(logo_path):
+                try:
+                    logo_img = Image.open(logo_path)
+                    logo_img = logo_img.resize((80, 80), Image.Resampling.LANCZOS)
+                    self.logo_image = ImageTk.PhotoImage(logo_img)
+                    logo_label = tk.Label(logo_frame, image=self.logo_image, bg='#46230a')
+                    logo_label.pack(expand=True)
+                    logo_loaded = True
+                    break
+                except Exception as e:
+                    print(f"Could not load logo {logo_path}: {e}")
+                    continue
+        
+        if not logo_loaded:
+            # Fallback logo with modern styling
+            logo_bg = tk.Frame(logo_frame, bg='#DAA520', width=80, height=80)
+            logo_bg.pack(expand=True)
+            logo_bg.pack_propagate(False)
+            logo_text = tk.Label(logo_bg, text="🚗", font=("Arial", 40), bg='#DAA520', fg='#2F1B14')
             logo_text.place(relx=0.5, rely=0.5, anchor="center")
         
         # Title section
         title_frame = tk.Frame(content_frame, bg='#46230a')
-        title_frame.pack(side="left", fill="both", expand=True)
+        title_frame.pack(side="left", fill="y", padx=(15, 0))
         
+        # Main title with modern typography
         title_label = tk.Label(title_frame, text=self.system_name, 
-                              font=("Arial", 32, "bold"), fg="#DAA520", bg='#46230a')
-        title_label.pack(anchor="w")
+                              font=("Arial", 28, "bold"), fg="#DAA520", bg='#46230a')
+        title_label.pack(anchor="w", pady=(10, 0))
         
-        subtitle_label = tk.Label(title_frame, 
-                                 text="We secure the safeness of your motorcycle inside our campus",
-                                 font=("Arial", 11), fg="#FFFFFF", bg='#46230a')
+        # Subtitle
+        subtitle_label = tk.Label(title_frame, text=f"Motor Vehicle Access Control System v{self.system_version}", 
+                                 font=("Arial", 12), fg="#CCCCCC", bg='#46230a')
         subtitle_label.pack(anchor="w")
+        
+        # Status indicator
+        status_label = tk.Label(title_frame, text="🟢 SYSTEM READY", 
+                               font=("Arial", 10, "bold"), fg="#00FF00", bg='#46230a')
+        status_label.pack(anchor="w", pady=(5, 0))
     
     def create_clock(self):
-        """Create real-time clock display"""
-        # Clock container in top right - use relative positioning
+        """Create digital clock display in top right corner"""
+        # Clock container in top right
         self.clock_frame = tk.Frame(self.root, bg='#46230a', bd=2, relief='solid')
-        self.clock_frame.place(relx=0.98, rely=0.02, width=230, height=80, anchor='ne')
+        self.clock_frame.place(relx=0.98, rely=0.02, width=220, height=80, anchor='ne')
         
         # Time display
-        self.time_label = tk.Label(self.clock_frame, text="", font=("Arial", 18, "bold"), 
-                                  fg="#DAA520", bg='#46230a')
-        self.time_label.pack(pady=5)
+        self.time_label = tk.Label(self.clock_frame, text="00:00:00", 
+                                  font=("Arial", 20, "bold"), fg="#DAA520", bg='#46230a')
+        self.time_label.pack(pady=(5, 0))
         
         # Date display
-        self.date_label = tk.Label(self.clock_frame, text="", font=("Arial", 11), 
-                                  fg="#FFFFFF", bg='#46230a')
+        self.date_label = tk.Label(self.clock_frame, text="Monday, January 01, 2025", 
+                                  font=("Arial", 10), fg="#FFFFFF", bg='#46230a')
         self.date_label.pack()
     
     def create_time_in_counter(self):
@@ -364,6 +381,7 @@ class MotorPassGUI:
         """Handle guest button click"""
         self.run_function(self.guest_function, "Guest Verification")
         
+    # MODIFIED ONLY THIS METHOD - added restart logic
     def run_function(self, function, title):
         """Hide GUI and run specified function"""
         try:
@@ -371,11 +389,94 @@ class MotorPassGUI:
             print(f"\n{'='*50}")
             print(f"🚗 {title} Started")
             print(f"{'='*50}")
-            function()
+            
+            # Run the function
+            result = function()
+            
+            # Check if this needs restart (student or guest verification)
+            if 'Student' in title or 'Guest' in title:
+                print("\n✅ Transaction completed!")
+                print("🔄 Quick restart for fresh camera...")
+                
+                # Set restart flag
+                self._restart_needed = True
+                
+                # Super fast restart - just 1 second
+                time.sleep(1)
+                
+                # Restart the application
+                self.restart_application()
+                return
+            
+            return result
+            
         except Exception as e:
+            print(f"❌ Error in {title}: {str(e)}")
+            
+            # If transaction function failed, still restart for clean state
+            if 'Student' in title or 'Guest' in title:
+                print("🔄 Quick restart after transaction...")
+                self._restart_needed = True
+                time.sleep(1)  # Fast restart on error too
+                self.restart_application()
+                return
+            
+            # For admin errors, show dialog and continue
             messagebox.showerror("Error", f"An error occurred: {str(e)}")
+            
         finally:
-            self.root.deiconify()
+            # Only show window again if not restarting
+            if not self._restart_needed:
+                self.root.deiconify()
+    
+    # ADDED ONLY THESE TWO METHODS - restart functionality
+    def restart_application(self):
+        """Restart the entire application - FAST VERSION"""
+        try:
+            print("🚀 Quick restart...")
+            
+            # Skip cleanup to avoid GPIO errors and be faster
+            # The new instance will handle cleanup at startup
+            
+            # Get current script info
+            main_script = sys.argv[0]  # This should be main.py
+            python_exe = sys.executable
+            
+            # Start new process immediately
+            subprocess.Popen([python_exe, main_script], 
+                           cwd=os.getcwd(),
+                           start_new_session=True)
+            
+            # Close current application immediately
+            self.root.quit()
+            self.root.destroy()
+            sys.exit(0)
+            
+        except Exception as e:
+            print(f"❌ Restart error: {e}")
+            # Fallback: try simple restart
+            self.simple_restart_application()
+    
+    def simple_restart_application(self):
+        """Simple restart using os.system (fallback method) - FAST VERSION"""
+        try:
+            print("🚀 Simple restart...")
+            
+            # Skip cleanup - let new instance handle it
+            # Simple restart command
+            main_script = os.path.abspath(sys.argv[0])
+            
+            # For Linux/Raspberry Pi
+            restart_cmd = f"python3 {main_script} &"
+            os.system(restart_cmd)
+            
+            # Exit current process
+            self.root.quit()
+            sys.exit(0)
+            
+        except Exception as e:
+            print(f"❌ Simple restart error: {e}")
+            self.root.quit()
             
     def exit_system(self):
         """Exit the system with confirmation"""
