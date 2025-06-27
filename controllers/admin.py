@@ -251,7 +251,9 @@ def admin_view_enrolled():
         print(f"   👔 Staff: {staff_count}")
         
 def admin_delete_fingerprint(slot_id=None):
-    """Delete user fingerprint with optional slot_id parameter for GUI"""
+    """Delete user fingerprint - SIMPLE FIX"""
+    from services.fingerprint import finger, load_fingerprint_database, save_fingerprint_database
+    
     database = load_fingerprint_database()
     if not database:
         print("📁 No users enrolled.")
@@ -266,30 +268,39 @@ def admin_delete_fingerprint(slot_id=None):
             print("❌ Cancelled.")
             return
     
-    if slot_id == "1":
+    # Convert to string for database check
+    slot_id_str = str(slot_id)
+    
+    if slot_id_str == "1":
         print("❌ Cannot delete admin slot. Use 'Change Admin' option.")
         return
         
-    if slot_id not in database:
-        print("❌ Slot not found.")
-        return
-        
-    user_info = database[slot_id]
-    user_type = user_info.get('user_type', 'STUDENT')
-    user_id = user_info.get('student_id' if user_type == 'STUDENT' else 'staff_no', 'N/A')
-    
-    print(f"\n📋 Deleting: {user_info['name']} ({user_type} - ID: {user_id})")
+    # Check if exists in database
+    if slot_id_str in database:
+        user_info = database[slot_id_str]
+        user_type = user_info.get('user_type', 'STUDENT')
+        user_id = user_info.get('student_id' if user_type == 'STUDENT' else 'staff_no', 'N/A')
+        print(f"\n📋 Deleting: {user_info['name']} ({user_type} - ID: {user_id})")
+    else:
+        print(f"\n📋 Deleting slot {slot_id} (not in database)")
     
     try:
-        if finger.delete_model(int(slot_id)) == adafruit_fingerprint.OK:
-            del database[slot_id]
-            save_fingerprint_database(database)
-            print(f"✅ Deleted {user_info['name']}")
+        # Delete from sensor (convert to int)
+        if finger.delete_model(int(slot_id)) == 0:  # 0 = success
+            print("✅ Deleted from sensor")
+            
+            # Delete from database if exists
+            if slot_id_str in database:
+                del database[slot_id_str]
+                save_fingerprint_database(database)
+                print("✅ Deleted from database")
+            
+            print(f"🎉 Slot {slot_id} deleted successfully!")
         else:
             print("❌ Failed to delete from sensor.")
-    except ValueError:
-        print("❌ Invalid slot ID.")
-        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+              
 def admin_reset_all():
     """Reset all system data with confirmation"""
     if not confirm_action("Delete ALL student fingerprints?", dangerous=True):
@@ -464,15 +475,18 @@ def admin_view_time_records():
         print("-" * 50)
 
 def admin_clear_time_records():
-    """Clear all time records"""
+
     if not confirm_action("Clear ALL time records?", dangerous=True):
         print("❌ Cancelled.")
         return
     
-    if clear_all_time_records():
-        print("✅ All time records cleared.")
-    else:
-        print("❌ Failed to clear records.")
+    try:
+        if clear_all_time_records():
+            print("✅ All time records cleared.")
+        else:
+            print("❌ Failed to clear records.")
+    except Exception as e:
+        print(f"❌ Error: {e}")
 
 
 def admin_change_fingerprint():

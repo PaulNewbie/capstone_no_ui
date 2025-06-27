@@ -1,4 +1,4 @@
-# ui/admin_gui.py - Enhanced Admin Panel GUI
+# ui/admin_gui.py - Complete Fixed Admin Panel GUI
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -35,19 +35,30 @@ class AdminPanelGUI:
         else:
             self.create_authentication_screen()
         
-        # Menu Action Functions
+    # Menu Action Functions
     def enroll_user(self):
-        """Enroll new user"""
+        """Enroll new user - SIMPLE FIX"""
         result = messagebox.askquestion("Enroll User", 
-                                       "This will start the enrollment process.\n\n" +
-                                       "You will need:\n" +
-                                       "• Student/Staff ID\n" +
-                                       "• User's fingerprint\n\n" +
-                                       "Continue?",
-                                       icon='info')
+                                   "This will start the enrollment process.\n\n" +
+                                   "You will need:\n" +
+                                   "• Student/Staff ID\n" +
+                                   "• User's fingerprint\n\n" +
+                                   "Continue?",
+                                   icon='info')
         if result == 'yes':
-            thread = threading.Thread(target=lambda: self.run_function('enroll'), daemon=True)
-            thread.start()
+            # Show loading message
+            messagebox.showinfo("Enrollment Started", 
+                          "Enrollment process starting...\n\n" +
+                          "Please check the terminal for instructions.",
+                          icon='info')
+        
+            # Run enrollment in background without complex threading
+            try:
+                self.admin_functions['enroll']()
+            except Exception as e:
+                messagebox.showerror("Enrollment Error", 
+                               f"Enrollment failed:\n\n{str(e)}",
+                               icon='error')
     
     def view_users(self):
         """View enrolled users"""
@@ -244,72 +255,21 @@ class AdminPanelGUI:
                 fg=self.colors['dark'], bg=self.colors['light']).pack(side="left")
     
     def delete_user(self):
-        """Delete user fingerprint"""
-        # Custom dialog
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Delete User")
-        dialog.geometry("400x200")
-        dialog.configure(bg=self.colors['white'])
-        dialog.transient(self.root)
-        dialog.grab_set()
+        """Delete user fingerprint - FIXED"""
+        slot_id = simpledialog.askstring("Delete User", 
+                                       "Enter Slot ID to delete:",
+                                       parent=self.root)
         
-        # Center dialog
-        dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() // 2) - 200
-        y = (dialog.winfo_screenheight() // 2) - 100
-        dialog.geometry(f"400x200+{x}+{y}")
-        
-        # Content
-        tk.Label(dialog, text="🗑️ DELETE USER", 
-                font=("Arial", 16, "bold"), fg=self.colors['accent'], 
-                bg=self.colors['white']).pack(pady=20)
-        
-        tk.Label(dialog, text="Enter Slot ID to delete:", 
-                font=("Arial", 12), fg=self.colors['dark'], 
-                bg=self.colors['white']).pack()
-        
-        # Entry
-        entry_frame = tk.Frame(dialog, bg=self.colors['white'])
-        entry_frame.pack(pady=20)
-        
-        slot_entry = tk.Entry(entry_frame, font=("Arial", 14), width=10, 
-                             relief='solid', bd=1)
-        slot_entry.pack()
-        slot_entry.focus()
-        
-        # Buttons
-        btn_frame = tk.Frame(dialog, bg=self.colors['white'])
-        btn_frame.pack(pady=20)
-        
-        def do_delete():
-            slot_id = slot_entry.get().strip()
-            if slot_id:
-                if slot_id == "1":
-                    messagebox.showerror("Error", "Cannot delete admin slot!")
-                    return
-                dialog.destroy()
-                if messagebox.askyesno("Confirm Delete", 
-                                     f"Delete user at slot #{slot_id}?\n\nThis cannot be undone!",
-                                     icon='warning'):
-                    thread = threading.Thread(target=lambda: self.run_delete(slot_id), daemon=True)
-                    thread.start()
-        
-        delete_btn = tk.Button(btn_frame, text="DELETE", 
-                              font=("Arial", 11, "bold"), 
-                              bg=self.colors['accent'], fg=self.colors['white'],
-                              relief='flat', bd=0, cursor="hand2",
-                              padx=20, pady=8, command=do_delete)
-        delete_btn.pack(side="left", padx=5)
-        
-        cancel_btn = tk.Button(btn_frame, text="CANCEL", 
-                              font=("Arial", 11, "bold"), 
-                              bg=self.colors['secondary'], fg=self.colors['white'],
-                              relief='flat', bd=0, cursor="hand2",
-                              padx=20, pady=8, command=dialog.destroy)
-        cancel_btn.pack(side="left", padx=5)
-        
-        # Bind Enter key
-        slot_entry.bind('<Return>', lambda e: do_delete())
+        if slot_id:
+            if slot_id == "1":
+                messagebox.showerror("Error", "Cannot delete admin slot!")
+                return
+            
+            if messagebox.askyesno("Confirm Delete", 
+                                 f"Delete user at slot #{slot_id}?\n\nThis cannot be undone!",
+                                 icon='warning'):
+                thread = threading.Thread(target=lambda: self.run_delete(slot_id), daemon=True)
+                thread.start()
     
     def run_delete(self, slot_id):
         """Run delete operation"""
@@ -445,7 +405,7 @@ class AdminPanelGUI:
         close_btn.pack(pady=20)
     
     def clear_time_records(self):
-        """Clear all time records"""
+        """Clear all time records - FIXED"""
         # Custom confirmation dialog
         if messagebox.askyesno("Clear Records", 
                               "Delete ALL time records?\n\n" +
@@ -456,8 +416,23 @@ class AdminPanelGUI:
                                  "Are you ABSOLUTELY SURE?\n\n" +
                                  "All time records will be deleted permanently!",
                                  icon='warning'):
-                thread = threading.Thread(target=lambda: self.run_function('clear_records'), daemon=True)
-                thread.start()
+                # FIXED: Call the function directly instead of through run_function
+                try:
+                    # Import the function directly
+                    from database.db_operations import clear_all_time_records
+                    
+                    if clear_all_time_records():
+                        messagebox.showinfo("✅ Success", 
+                                          "All time records have been cleared successfully!",
+                                          icon='info')
+                    else:
+                        messagebox.showerror("❌ Error", 
+                                           "Failed to clear records. Please try again.",
+                                           icon='error')
+                except Exception as e:
+                    messagebox.showerror("❌ Error", 
+                                       f"Failed to clear records:\n\n{str(e)}",
+                                       icon='error')
     
     def open_dashboard(self):
         """Open web dashboard"""
@@ -495,7 +470,6 @@ class AdminPanelGUI:
             if function_name in messages:
                 title, msg = messages[function_name]
                 self.root.after(0, lambda: messagebox.showinfo(title, msg, icon='info'))
-            pass
                 
         except Exception as e:
             error_message = str(e)
@@ -521,24 +495,23 @@ class AdminPanelGUI:
             print(f"Error running GUI: {e}")
             self.close()
             
-######################################################
     def setup_window(self):
         """Setup the main window with enhanced styling"""
         self.root.title("MotorPass - Admin Control Center")
         self.root.configure(bg=self.colors['light'])
-		
+        
         # Get screen dimensions
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
-		
+        
         # Set window size (90% of screen for better view)
         window_width = int(screen_width * 0.90)
         window_height = int(screen_height * 0.90)
-		
+        
         # Center window
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
-		
+        
         self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
         self.root.resizable(True, True)
         self.root.minsize(1000, 700)
@@ -935,7 +908,7 @@ class AdminPanelGUI:
         
         exit_btn.bind("<Enter>", lambda e: exit_btn.config(bg='#C0392B'))
         exit_btn.bind("<Leave>", lambda e: exit_btn.config(bg=self.colors['accent']))
-    
+
 
 # Test function
 if __name__ == "__main__":
