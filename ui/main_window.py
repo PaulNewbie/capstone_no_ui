@@ -108,7 +108,7 @@ class MotorPassGUI:
     def create_header(self):
         """Create modern header with logo and title"""
         # Header overlay with transparency effect
-        header_frame = tk.Frame(self.root, bg='#46230a', height=100)
+        header_frame = tk.Frame(self.root, bg='#46230a', height=120)
         header_frame.pack(fill="x", padx=0, pady=0)
         header_frame.pack_propagate(False)
         
@@ -120,7 +120,7 @@ class MotorPassGUI:
         content_frame.pack(fill="both", expand=True, padx=20, pady=10)
         
         # Logo section
-        logo_frame = tk.Frame(content_frame, bg='#46230a', width= 90, height=80)
+        logo_frame = tk.Frame(content_frame, bg='#46230a', width= 95, height=85)
         logo_frame.pack(side="left", padx=(0, 15), pady=5)
         logo_frame.pack_propagate(False)
         
@@ -132,7 +132,7 @@ class MotorPassGUI:
             if os.path.exists(logo_path):
                 try:
                     logo_img = Image.open(logo_path)
-                    logo_img = logo_img.resize((80, 80), Image.Resampling.LANCZOS)
+                    logo_img = logo_img.resize((95, 95), Image.Resampling.LANCZOS)
                     self.logo_image = ImageTk.PhotoImage(logo_img)
                     logo_label = tk.Label(logo_frame, image=self.logo_image, bg='#46230a')
                     logo_label.pack(expand=True)
@@ -156,18 +156,15 @@ class MotorPassGUI:
         
         # Main title with modern typography
         title_label = tk.Label(title_frame, text=self.system_name, 
-                              font=("Arial", 28, "bold"), fg="#DAA520", bg='#46230a')
+                              font=("Arial", 30, "bold"), fg="#DAA520", bg='#46230a')
         title_label.pack(anchor="w", pady=(10, 0))
         
         # Subtitle
-        subtitle_label = tk.Label(title_frame, text=f"Motor Vehicle Access Control System v{self.system_version}", 
-                                 font=("Arial", 12), fg="#CCCCCC", bg='#46230a')
+        subtitle_label = tk.Label(title_frame, text=f"**We secure the safeness of your motorcycle in side our campus**", 
+                                 font=("Arial", 11), fg="#c7971d", bg='#46230a')
         subtitle_label.pack(anchor="w")
-        
-        # Status indicator
-        status_label = tk.Label(title_frame, text="🟢 SYSTEM READY", 
-                               font=("Arial", 10, "bold"), fg="#00FF00", bg='#46230a')
-        status_label.pack(anchor="w", pady=(5, 0))
+
+
     
     def create_clock(self):
         """Create digital clock display in top right corner"""
@@ -189,16 +186,16 @@ class MotorPassGUI:
         """Create time-in counter display in bottom right"""
         # Counter container in bottom right
         self.counter_frame = tk.Frame(self.root, bg='#46230a', bd=2, relief='solid')
-        self.counter_frame.place(relx=0.98, rely=0.98, width=200, height=70, anchor='se')
+        self.counter_frame.place(relx=0.98, rely=0.98, width=250, height=85, anchor='se')
         
         # Title display
         counter_title = tk.Label(self.counter_frame, text="Currently Inside", 
-                               font=("Arial", 11, "bold"), fg="#FFFFFF", bg='#46230a')
+                               font=("Arial", 13, "bold"), fg="#FFFFFF", bg='#46230a')
         counter_title.pack(pady=(5, 0))
         
         # Count display
         self.count_label = tk.Label(self.counter_frame, text="0", 
-                                  font=("Arial", 20, "bold"), fg="#DAA520", bg='#46230a')
+                                  font=("Arial", 25, "bold"), fg="#DAA520", bg='#46230a')
         self.count_label.pack()
     
     def get_current_time_in_count(self):

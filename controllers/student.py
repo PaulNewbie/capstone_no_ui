@@ -1,4 +1,4 @@
-# controllers/student.py - Simple fix with license expiration function
+# controllers/student.py - FIXED key name for GUI callback
 
 from services.fingerprint import authenticate_fingerprint
 from services.license_reader import *
@@ -35,7 +35,7 @@ def student_verification():
     gui.run()
 
 def run_verification_with_gui(status_callback):
-    """Run verification steps with GUI status updates - Simple fix"""
+    """Run verification steps with GUI status updates - FIXED key name"""
     
     # Initialize systems
     init_buzzer()
@@ -68,7 +68,7 @@ def run_verification_with_gui(status_callback):
         
         # Step 2: Fingerprint verification
         status_callback({'current_step': '👆 Please place your finger on the scanner'})
-        status_callback({'fingerprint_status': 'WAITING'})
+        status_callback({'fingerprint_status': 'PROCESSING'})  # Changed from WAITING to PROCESSING
         
         user_info = authenticate_fingerprint()
         
@@ -81,11 +81,12 @@ def run_verification_with_gui(status_callback):
             return {'verified': False, 'reason': 'Fingerprint authentication failed'}
         
         status_callback({'fingerprint_status': 'VERIFIED'})
-        status_callback({'student_info': user_info})
+        # FIXED: Change 'student_info' to 'user_info' to match GUI expectation
+        status_callback({'user_info': user_info})
         
         # FIXED: Check current status with correct user_id
         user_id = user_info.get('unified_id', user_info.get('student_id', ''))
-        current_status = get_student_time_status(user_id)  # FIXED: Use user_id instead of user_info
+        current_status = get_student_time_status(user_id)
         
         print(f"🔍 Current status for {user_info['name']}: {current_status}")
         

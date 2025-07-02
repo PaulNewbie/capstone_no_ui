@@ -697,7 +697,7 @@ def auto_capture_license_rpi(reference_name: str = "", fingerprint_info: Optiona
     KEYWORD_CHECK_INTERVAL = 5
     
     # Stability settings for longer green time
-    STABILITY_FRAMES = 1  # Need 1 good reading to go green (reduced from 5 for faster response)
+    STABILITY_FRAMES = 1.2  # Need 1 good reading to go green (reduced from 5 for faster response)
     MIN_GREEN_TIME = 2  # Stay green for at least 2 seconds
     KEYWORD_HISTORY_SIZE = 8  # Track last 8 readings
     
