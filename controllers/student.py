@@ -1,6 +1,6 @@
 # controllers/student.py - FIXED key name for GUI callback
 
-from services.fingerprint import authenticate_fingerprint
+from services.fingerprint import *
 from services.license_reader import *
 from services.helmet_infer import verify_helmet
 from services.led_control import *
@@ -20,6 +20,7 @@ from utils.gui_helpers import show_results_gui
 import time
 from datetime import datetime
 import tkinter as tk
+import tkinter.messagebox as msgbox
 
 
 def student_verification():
@@ -68,20 +69,51 @@ def run_verification_with_gui(status_callback):
         
         # Step 2: Fingerprint verification
         status_callback({'current_step': '👆 Please place your finger on the scanner'})
-        status_callback({'fingerprint_status': 'PROCESSING'})  # Changed from WAITING to PROCESSING
+        status_callback({'fingerprint_status': 'PROCESSING'})
         
-        user_info = authenticate_fingerprint()
+        try:
+            user_info = authenticate_fingerprint(max_attempts=5)
+        except Exception as e:
+            print(f"❌ Fingerprint error: {e}")
+            user_info = None
         
         if not user_info:
             status_callback({'fingerprint_status': 'FAILED'})
             status_callback({'current_step': '❌ Fingerprint authentication failed'})
-            set_led_idle()
-            play_failure()
-            cleanup_buzzer()
-            return {'verified': False, 'reason': 'Fingerprint authentication failed'}
+            
+            # Simple popup with Try Again button
+            try_again = msgbox.askyesno(
+                "Fingerprint Failed", 
+                "Fingerprint authentication failed.\n\nWould you like to try again?",
+                icon='warning'
+            )
+            
+            if try_again:
+                # One more attempt
+                status_callback({'fingerprint_status': 'PROCESSING'})
+                status_callback({'current_step': '🔄 Retrying fingerprint scan...'})
+                time.sleep(1)
+                
+                try:
+                    user_info = authenticate_fingerprint(max_attempts=5)
+                except Exception as e:
+                    print(f"❌ Fingerprint retry error: {e}")
+                    user_info = None
+                
+                if not user_info:
+                    status_callback({'fingerprint_status': 'FAILED'})
+                    status_callback({'current_step': '❌ Final fingerprint attempt failed'})
+                    set_led_idle()
+                    play_failure()
+                    cleanup_buzzer()
+                    return {'verified': False, 'reason': 'Fingerprint authentication failed'}
+            else:
+                set_led_idle()
+                play_failure()
+                cleanup_buzzer()
+                return {'verified': False, 'reason': 'Fingerprint authentication cancelled'}
         
         status_callback({'fingerprint_status': 'VERIFIED'})
-        # FIXED: Change 'student_info' to 'user_info' to match GUI expectation
         status_callback({'user_info': user_info})
         
         # FIXED: Check current status with correct user_id
@@ -194,17 +226,37 @@ def run_verification_with_gui(status_callback):
             print("📄 LICENSE CAPTURE (Terminal Camera)")
             print("="*60)
             
-            image_path = auto_capture_license_rpi(
-                reference_name=user_info['name'],
-                fingerprint_info=user_info
-            )
+            from services.license_reader import _count_verification_keywords
+            license_success = False
+            image_path = None
             
-            if not image_path:
-                status_callback({'current_step': '❌ License capture failed'})
-                set_led_idle()
-                play_failure()
-                cleanup_buzzer()
-                return {'verified': False, 'reason': 'License capture failed'}
+            for attempt in range(2):  # Try twice
+                print(f"\n📷 License attempt {attempt + 1}/2")
+                
+                image_path = auto_capture_license_rpi(
+                    reference_name=user_info.get('name', ''),
+                    fingerprint_info=user_info
+                )
+                
+                if image_path:
+                    ocr_text = extract_text_from_image(image_path)
+                    if _count_verification_keywords(ocr_text) >= 3:
+                        license_success = True
+                        break
+                    elif attempt == 0:  # First attempt failed
+                        if not msgbox.askyesno("Retry?", "Poor scan quality. Try again?"):
+                            break
+            
+            if not license_success:
+                if msgbox.askyesno("Admin Override", "Use admin fingerprint?"):
+                    if check_admin_fingerprint():
+                        print("✅ Admin override successful")
+                        # Continue to time tracking
+                    else:
+                        return {'verified': False, 'reason': 'Admin override failed'}
+                else:
+                    return {'verified': False, 'reason': 'License verification cancelled'}
+
             
             # Verify license
             is_fully_verified = complete_verification_flow(
@@ -288,3 +340,68 @@ def check_license_expiration(user_info):
     except Exception as e:
         print(f"❌ Error checking license expiration: {e}")
         return True  # Error checking, assume valid
+
+def check_admin_fingerprint():
+    """Enhanced admin fingerprint check with retries and better feedback"""
+    from services.fingerprint import finger
+    import adafruit_fingerprint
+    import time
+    
+    print("\n🔐 ADMIN OVERRIDE REQUEST")
+    print("Place ADMIN finger on sensor...")
+    
+    max_attempts = 3
+    
+    for attempt in range(max_attempts):
+        try:
+            print(f"Attempt {attempt + 1}/{max_attempts} - Place finger on sensor...")
+            
+            # Wait for finger
+            timeout = 10  # 10 second timeout per attempt
+            start_time = time.time()
+            
+            while time.time() - start_time < timeout:
+                if finger.get_image() == adafruit_fingerprint.OK:
+                    break
+                time.sleep(0.1)
+            else:
+                print(f"❌ Timeout - No finger detected (attempt {attempt + 1})")
+                if attempt < max_attempts - 1:
+                    continue
+                else:
+                    return False
+            
+            # Convert and search
+            if finger.image_2_tz(1) != adafruit_fingerprint.OK:
+                print(f"❌ Image processing failed (attempt {attempt + 1})")
+                continue
+                
+            result = finger.finger_search()
+            
+            if result == adafruit_fingerprint.OK:
+                if finger.finger_id == 1:  # Admin is always slot 1
+                    print(f"✅ Admin verified! (ID: {finger.finger_id}, Confidence: {finger.confidence})")
+                    return True
+                else:
+                    print(f"❌ Not admin fingerprint (ID: {finger.finger_id})")
+                    if attempt < max_attempts - 1:
+                        print("Try again with admin finger...")
+                        time.sleep(1)
+                        continue
+                    else:
+                        return False
+            else:
+                print(f"❌ Fingerprint not found in database (attempt {attempt + 1})")
+                if attempt < max_attempts - 1:
+                    print("Try again...")
+                    time.sleep(1)
+                    continue
+                    
+        except Exception as e:
+            print(f"❌ Error during admin check (attempt {attempt + 1}): {e}")
+            if attempt < max_attempts - 1:
+                time.sleep(1)
+                continue
+    
+    print("❌ Admin verification failed after all attempts")
+    return False

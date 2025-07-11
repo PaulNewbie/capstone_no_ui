@@ -1,12 +1,34 @@
 # ui/student_gui.py - Fixed Hybrid GUI (Terminal Camera + GUI Display)
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, scrolledtext
 import threading
 from datetime import datetime
 import os
 from PIL import Image, ImageTk
 from typing import Dict
+import sys
+import queue
+
+class SimpleConsole:
+    def __init__(self, text_widget):
+        self.text_widget = text_widget
+        self.old_stdout = sys.stdout
+        sys.stdout = self
+        
+    def write(self, text):
+        if text.strip():
+            self.text_widget.after(0, self.add_text, text)
+    
+    def add_text(self, text):
+        self.text_widget.config(state='normal')
+        self.text_widget.insert('end', text + '\n')
+        self.text_widget.see('end')
+        self.text_widget.config(state='disabled')
+        
+    def flush(self):
+        pass
+
 
 class StudentVerificationGUI:
     def __init__(self, verification_function):
@@ -14,6 +36,7 @@ class StudentVerificationGUI:
         self.verification_function = verification_function
         self.verification_complete = False  # Initialize BEFORE other methods
         self.setup_window()
+        self.console = SimpleConsole(self.console_text)
         self.create_variables()
         self.create_interface()
         
@@ -33,6 +56,23 @@ class StudentVerificationGUI:
         # Center window
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
+        
+        # Console on the right
+        console_frame = tk.Frame(self.root, bg='#2d2d2d')
+        console_frame.pack(side=tk.RIGHT, fill=tk.BOTH, padx=10, pady=10)
+        
+        tk.Label(console_frame, text="System Console", 
+                font=('Arial', 14, 'bold'), 
+                bg='#2d2d2d', fg='white').pack()
+        
+        self.console_text = scrolledtext.ScrolledText(
+            console_frame,
+            width=40, height=25,
+            bg='black', fg='lime',
+            font=('Courier', 9),
+            state='disabled'
+        )
+        self.console_text.pack(padx=5, pady=5)
         
         self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
         self.root.resizable(False, False)
