@@ -362,10 +362,15 @@ def extract_guest_name_from_license_simple(image_path: str) -> Dict[str, str]:
 def extract_guest_name_from_license(ocr_lines: List[str]) -> str:
     # Enhanced filter keywords
     filter_keywords = [
-        'ROAD', 'STREET', 'AVENUE', 'DISTRICT', 'CITY', 'PROVINCE', 'MARILAO', 'BULACAN',
-        'BARANGAY', 'REPUBLIC', 'PHILIPPINES', 'TRANSPORTATION', 
-        'DRIVER', 'LICENSE', 'NATIONALITY', 'ADDRESS', 'WEIGHT', 'HEIGHT',
-        'LN', 'FNMN', 'LNFMMH'
+        'REPUBLIC', 'PHILIPPINES', 'DEPARTMENT', 'TRANSPORTATION', 
+        'LAND TRANSPORTATION OFFICE', 'DRIVER', 'LICENSE', 'DRIVERS LICENSE',
+        'NON-PROFESSIONAL', 'PROFESSIONAL', 'NATIONALITY', 'ADDRESS', 
+        'DATE OF BIRTH', 'EXPIRATION', 'AGENCY CODE', 'CONDITIONS',
+        'EYES COLOR', 'WEIGHT', 'HEIGHT', 'BLOOD TYPE', 'RESTRICTION',
+        'SIGNATURE', 'PHOTO', 'FIRST NAME', 'LAST NAME', 'MIDDLE NAME',
+        'CITY', 'PROVINCE', 'BARANGAY', 'STREET', 'ROAD', 'AVENUE',
+        'RESIDENCIA', 'BLK', 'LOT', 
+        'LN', 'FNMN', 'LNFMMH', 'LNFN,MN', 'LN, FNMN', 'MN', 'Agency Code', 'Code', 'DL Codes'
     ]
     
     # Stop markers specific to Philippine licenses
@@ -378,7 +383,7 @@ def extract_guest_name_from_license(ocr_lines: List[str]) -> str:
         'EN', 'ED', 'AC', 'YC', 'DLC', 'SI', 'S'
     ]
     
-    name_markers = ['LNFMMH', 'LNFMM', 'LN FN MN', 'LAST NAME', 'FIRST NAME', 'LN.FN.MN', 'LN.FN,MN']
+    name_markers = ['LNFMMH', 'LNFMM', 'LN FN MN', 'LAST NAME', 'FIRST NAME', 'LNFN, MN', 'LNFN,MN']
     
     potential_names = []
     name_marker_index = -1

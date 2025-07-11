@@ -251,56 +251,83 @@ def run_verification_with_gui(status_callback):
                 if msgbox.askyesno("Admin Override", "Use admin fingerprint?"):
                     if check_admin_fingerprint():
                         print("✅ Admin override successful")
-                        # Continue to time tracking
+                        
+                        # FIXED: Skip license verification flow and go directly to time tracking
+                        # Record TIME IN
+                        if record_time_in(user_info):
+                            timestamp = time.strftime('%H:%M:%S')
+                            status_callback({'current_step': f'✅ TIME IN recorded at {timestamp}'})
+                            set_led_success(duration=5.0)
+                            play_success()
+                            
+                            result = {
+                                'verified': True,
+                                'name': user_info['name'],
+                                'time_action': 'IN',
+                                'timestamp': timestamp,
+                                'admin_override': True  # Mark as admin override
+                            }
+                            cleanup_buzzer()
+                            return result
+                        else:
+                            status_callback({'current_step': '❌ Failed to record time'})
+                            set_led_idle()
+                            play_failure()
+                            cleanup_buzzer()
+                            return {'verified': False, 'reason': 'Failed to record time'}
                     else:
                         return {'verified': False, 'reason': 'Admin override failed'}
                 else:
                     return {'verified': False, 'reason': 'License verification cancelled'}
-
             
-            # Verify license
-            is_fully_verified = complete_verification_flow(
-                image_path=image_path,
-                fingerprint_info=user_info,
-                helmet_verified=True,
-                license_expiration_valid=license_expiration_valid
-            )
-            
-            # Show verification summary
-            verification_summary = {
-                'helmet': True,
-                'fingerprint': True,
-                'license_valid': license_expiration_valid,
-                'license_detected': "Driver's License Detected" in str(is_fully_verified),
-                'name_match': is_fully_verified
-            }
-            status_callback({'verification_summary': verification_summary})
-            
-            if is_fully_verified:
-                # Record TIME IN
-                if record_time_in(user_info):
-                    timestamp = time.strftime('%H:%M:%S')
-                    status_callback({'current_step': f'✅ TIME IN recorded at {timestamp}'})
-                    set_led_success(duration=5.0)
-                    play_success()
-                    
-                    result = {
-                        'verified': True,
-                        'name': user_info['name'],
-                        'time_action': 'IN',
-                        'timestamp': timestamp,
-                        'student_id': user_info.get('student_id', 'N/A')
-                    }
+            # ONLY run verification flow if license_success is True
+            if license_success:
+                # Verify license
+                is_fully_verified = complete_verification_flow(
+                    image_path=image_path,
+                    fingerprint_info=user_info,
+                    helmet_verified=True,
+                    license_expiration_valid=license_expiration_valid
+                )
+                
+                # Show verification summary
+                verification_summary = {
+                    'helmet': True,
+                    'fingerprint': True,
+                    'license_valid': license_expiration_valid,
+                    'license_detected': "Driver's License Detected" in str(is_fully_verified),
+                    'name_match': is_fully_verified
+                }
+                status_callback({'verification_summary': verification_summary})
+                
+                if is_fully_verified:
+                    # Record TIME IN
+                    if record_time_in(user_info):
+                        timestamp = time.strftime('%H:%M:%S')
+                        status_callback({'current_step': f'✅ TIME IN recorded at {timestamp}'})
+                        set_led_success(duration=5.0)
+                        play_success()
+                        
+                        result = {
+                            'verified': True,
+                            'name': user_info['name'],
+                            'time_action': 'IN',
+                            'timestamp': timestamp,
+                        }
+                        cleanup_buzzer()
+                        return result
+                    else:
+                        status_callback({'current_step': '❌ Failed to record time'})
+                        set_led_idle()
+                        play_failure()
+                        cleanup_buzzer()
+                        return {'verified': False, 'reason': 'Failed to record time'}
                 else:
-                    status_callback({'current_step': '❌ Failed to record TIME IN'})
+                    status_callback({'current_step': '❌ License verification failed'})
                     set_led_idle()
                     play_failure()
-                    result = {'verified': False, 'reason': 'Failed to record TIME IN'}
-            else:
-                status_callback({'current_step': '❌ Verification failed'})
-                set_led_idle()
-                play_failure()
-                result = {'verified': False, 'reason': 'License verification failed'}
+                    cleanup_buzzer()
+                    return {'verified': False, 'reason': 'License verification failed'}
                 
     except Exception as e:
         print(f"❌ Error in verification: {e}")

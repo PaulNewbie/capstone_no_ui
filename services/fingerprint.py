@@ -283,6 +283,9 @@ Enrollment Successful! ✅
         
 def authenticate_fingerprint(max_attempts=3):
     """Authenticate fingerprint and return user info with retry mechanism - Updated for Students & Staff"""
+    import tkinter as tk
+    from tkinter import messagebox
+    
     attempts = 0
     
     while attempts < max_attempts:
@@ -311,8 +314,15 @@ def authenticate_fingerprint(max_attempts=3):
             
             if attempts < max_attempts:
                 print(f"🔄 Try again? ({max_attempts - attempts} attempts remaining)")
-                choice = input("Press Enter to retry, or 'q' to quit: ").strip().lower()
-                if choice == 'q':
+                
+                # FIXED: Use GUI button instead of console input
+                try_again = messagebox.askyesno(
+                    "Fingerprint Not Found",
+                    f"No fingerprint match found.\n\nAttempt {attempts}/{max_attempts}\n\nWould you like to try again?",
+                    icon='warning'
+                )
+                
+                if not try_again:
                     print("❌ Authentication cancelled by user")
                     return None
                 continue
@@ -371,7 +381,7 @@ def authenticate_fingerprint(max_attempts=3):
             }
     
     return None
-    
+     
 def authenticate_admin(max_attempts=3):
     """Authenticate admin using fingerprint with retry mechanism"""
     attempts = 0
