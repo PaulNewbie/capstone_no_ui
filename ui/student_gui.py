@@ -1,4 +1,4 @@
-# ui/student_gui.py - Fixed Hybrid GUI (Terminal Camera + GUI Display)
+# ui/student_gui.py - Complete Student GUI with MINIMAL requested changes only
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext
@@ -108,7 +108,7 @@ class StudentVerificationGUI:
     
     def create_interface(self):
         """Create the main interface"""
-        # Main container with gradient background
+        # Main container
         main_container = tk.Frame(self.root, bg='#8B4513')
         main_container.pack(fill="both", expand=True)
         
@@ -128,10 +128,10 @@ class StudentVerificationGUI:
         panels_container = tk.Frame(content_frame, bg='#8B4513')
         panels_container.pack(fill="both", expand=True)
         
-        # Left panel - Status indicators
+        # Left panel - Status indicators WITH user info
         self.create_left_panel(panels_container)
         
-        # Right panel - Details
+        # Right panel - Camera Feed (empty)
         self.create_right_panel(panels_container)
         
         # Footer
@@ -193,9 +193,9 @@ class StudentVerificationGUI:
                 fg="#DAA520", bg='#46230a').pack(padx=15, pady=(10, 5))
         tk.Label(clock_frame, textvariable=self.date_string, font=("Arial", 11), 
                 fg="#FFFFFF", bg='#46230a').pack(padx=15, pady=(0, 10))
-    
+
     def create_left_panel(self, parent):
-        """Create left panel with status indicators"""
+        """Create left panel with status indicators AND user info"""
         left_frame = tk.Frame(parent, bg='#8B4513')
         left_frame.pack(side="left", fill="both", expand=True, padx=(0, 20))
         
@@ -209,48 +209,43 @@ class StudentVerificationGUI:
         
         # Status items
         status_items_frame = tk.Frame(status_container, bg='white')
-        status_items_frame.pack(fill="both", expand=True, padx=30)
+        status_items_frame.pack(fill="x", padx=30, pady=(0, 20))
         
         self.create_status_item(status_items_frame, "🪖 HELMET CHECK:", self.helmet_status, 0)
-        self.create_status_item(status_items_frame, "🔒 FINGERPRINT:", self.fingerprint_status, 1)
-        self.create_status_item(status_items_frame, "📅 LICENSE VALID:", self.license_status, 2)
+        self.create_status_item(status_items_frame, "👆 FINGERPRINT:", self.fingerprint_status, 1)
+        self.create_status_item(status_items_frame, "🪪 LICENSE CHECK:", self.license_status, 2)
         
-        # Current step
-        step_frame = tk.Frame(status_container, bg='#f0f0f0', relief='sunken', bd=1)
-        step_frame.pack(fill="x", padx=20, pady=20)
+        # User authenticated section (moved here from right panel)
+        self.user_info_panel = tk.Frame(status_container, bg='#e3f2fd', relief='ridge', bd=2)
         
-        tk.Label(step_frame, text="Current Process:", font=("Arial", 12, "bold"), 
-                fg="#333333", bg='#f0f0f0').pack(anchor="w", padx=15, pady=(15, 5))
-        tk.Label(step_frame, textvariable=self.current_step, font=("Arial", 11), 
-                fg="#0066CC", bg='#f0f0f0', wraplength=400, justify="left").pack(anchor="w", padx=15, pady=(0, 15))
+        tk.Label(self.user_info_panel, text="👤 USER AUTHENTICATED", 
+                font=("Arial", 16, "bold"), fg="#1565c0", bg='#e3f2fd').pack(pady=15)
         
-        # Note about camera
-        note_frame = tk.Frame(status_container, bg='#fffacd')
-        note_frame.pack(fill="x", padx=20, pady=(0, 20))
+        self.user_details_frame = tk.Frame(self.user_info_panel, bg='#e3f2fd')
+        self.user_details_frame.pack(padx=20, pady=(0, 20))
         
-        tk.Label(note_frame, text="📷 Note: Camera operations are shown in terminal window", 
-                font=("Arial", 10, "italic"), fg="#666666", bg='#fffacd').pack(padx=10, pady=10)
-    
-    def create_status_item(self, parent, label, status_var, row):
-        """Create a single status item"""
+        # Initially hidden
+        self.user_info_panel.pack_forget()
+
+    def create_status_item(self, parent, label_text, status_var, row):
+        """Create individual status item with improved design"""
+        # Container for this item with better spacing
         item_frame = tk.Frame(parent, bg='white')
-        item_frame.pack(fill="x", pady=10)
+        item_frame.pack(fill="x", pady=15)
         
-        # Label
-        tk.Label(item_frame, text=label, font=("Arial", 14, "bold"), 
-                fg="#333333", bg='white', width=20, anchor="w").pack(side="left")
+        # Label with improved typography
+        tk.Label(item_frame, text=label_text, font=("Arial", 16, "bold"), 
+                fg="#333333", bg='white').pack(side="left")
         
-        # Status badge
-        status_frame = tk.Frame(item_frame, bg='white')
-        status_frame.pack(side="left", padx=20)
+        # Status badge with better design
+        badge = tk.Label(item_frame, text="PENDING", font=("Arial", 12, "bold"), 
+                        fg="#FFFFFF", bg="#95a5a6", padx=20, pady=8, relief='flat')
+        badge.pack(side="right", padx=(0, 10))
         
-        badge = tk.Label(status_frame, textvariable=status_var, font=("Arial", 12, "bold"), 
-                        fg="white", bg="#6C757D", padx=20, pady=8, relief="raised", bd=2)
-        badge.pack(side="left")
-        
-        # Icon
-        icon_label = tk.Label(status_frame, text="", font=("Arial", 20), bg='white')
-        icon_label.pack(side="left", padx=(10, 0))
+        # Status icon with improved size
+        icon_label = tk.Label(item_frame, text="⏸", font=("Arial", 18), 
+                             fg="#95a5a6", bg='white')
+        icon_label.pack(side="right", padx=(0, 15))
         
         # Store references
         setattr(self, f"badge_{row}", badge)
@@ -260,7 +255,7 @@ class StudentVerificationGUI:
         status_var.trace_add("write", lambda *args: self.update_status_display(row, status_var.get()))
     
     def update_status_display(self, row, status):
-        """Update status display colors and icons"""
+        """Update status display colors and icons with improved styling"""
         badge = getattr(self, f"badge_{row}", None)
         icon = getattr(self, f"icon_{row}", None)
         
@@ -268,66 +263,43 @@ class StudentVerificationGUI:
             return
             
         status_configs = {
-            "VERIFIED": ("#28a745", "✓", "#28a745"),
-            "VALID": ("#28a745", "✓", "#28a745"),
-            "PROCESSING": ("#FFA500", "⏳", "#FFA500"),
-            "CHECKING": ("#17a2b8", "🔍", "#17a2b8"),
-            "FAILED": ("#DC3545", "❌", "#DC3545"),
-            "INVALID": ("#DC3545", "❌", "#DC3545"),
-            "PENDING": ("#6C757D", "⏸", "#6C757D"),
-            "EXPIRED": ("#DC3545", "⚠️", "#DC3545")
+            "VERIFIED": ("#27ae60", "✅", "#27ae60"),      # Green
+            "VALID": ("#27ae60", "✅", "#27ae60"),
+            "PROCESSING": ("#f39c12", "⏳", "#f39c12"),    # Orange
+            "CHECKING": ("#3498db", "🔍", "#3498db"),      # Blue
+            "FAILED": ("#e74c3c", "❌", "#e74c3c"),        # Red
+            "INVALID": ("#e74c3c", "❌", "#e74c3c"),
+            "PENDING": ("#95a5a6", "⏸", "#95a5a6"),        # Gray
+            "EXPIRED": ("#e74c3c", "⚠️", "#e74c3c")
         }
         
-        config = status_configs.get(status.upper(), ("#6C757D", "", "#6C757D"))
-        badge.config(bg=config[0])
-        icon.config(text=config[1], fg=config[2])
-    
+        config = status_configs.get(status.upper(), ("#95a5a6", "⏸", "#95a5a6"))
+        
+        # Update badge with improved styling
+        badge.config(bg=config[0], text=status.upper(), font=("Arial", 12, "bold"))
+        icon.config(text=config[1], fg=config[2], font=("Arial", 18))
+
     def create_right_panel(self, parent):
-        """Create right panel with details"""
+        """Create right panel - empty with camera feed title"""
         right_frame = tk.Frame(parent, bg='#8B4513')
         right_frame.pack(side="right", fill="both", expand=True)
         
-        # Details container
-        details_container = tk.Frame(right_frame, bg='white', relief='raised', bd=3)
-        details_container.pack(fill="both", expand=True)
+        # Camera feed container (same size as original details container)
+        camera_container = tk.Frame(right_frame, bg='white', relief='raised', bd=3)
+        camera_container.pack(fill="both", expand=True)
         
-        # Title
-        tk.Label(details_container, text="VERIFICATION DETAILS", 
+        # Camera feed title
+        tk.Label(camera_container, text="📹 CAMERA FEED", 
                 font=("Arial", 20, "bold"), fg="#333333", bg='white').pack(pady=20)
         
-        # Details content
-        self.details_content = tk.Frame(details_container, bg='white')
-        self.details_content.pack(fill="both", expand=True, padx=20, pady=10)
+        # Empty space to maintain size
+        empty_frame = tk.Frame(camera_container, bg='white')
+        empty_frame.pack(fill="both", expand=True, padx=20, pady=10)
         
-        # Initial message
-        self.initial_message = tk.Label(self.details_content, 
-                                       text="Verification in progress...\nPlease check the terminal window for camera operations.",
-                                       font=("Arial", 14), fg="#666666", bg='white', justify="center")
-        self.initial_message.pack(expand=True)
-        
-        # Hidden panels for later use
-        self.create_hidden_panels()
-    
-    def create_hidden_panels(self):
-        """Create panels that will be shown later"""
-        # User info panel
-        self.user_info_panel = tk.Frame(self.details_content, bg='#e3f2fd', relief='ridge', bd=2)
-        
-        tk.Label(self.user_info_panel, text="👤 USER AUTHENTICATED", 
-                font=("Arial", 16, "bold"), fg="#1565c0", bg='#e3f2fd').pack(pady=15)
-        
-        self.user_details_frame = tk.Frame(self.user_info_panel, bg='#e3f2fd')
-        self.user_details_frame.pack(padx=20, pady=(0, 20))
-        
-        # Verification summary panel
-        self.summary_panel = tk.Frame(self.details_content, bg='#f5f5f5', relief='ridge', bd=2)
-        
-        tk.Label(self.summary_panel, text="🎯 VERIFICATION SUMMARY", 
-                font=("Arial", 16, "bold"), fg="#333333", bg='#f5f5f5').pack(pady=15)
-        
-        self.summary_frame = tk.Frame(self.summary_panel, bg='#f5f5f5')
-        self.summary_frame.pack(padx=20, pady=(0, 20))
-    
+        # Optional: Simple message
+        tk.Label(empty_frame, text="Terminal Camera Active\nCheck terminal for camera operations", 
+                font=("Arial", 14), fg="#666666", bg='white', justify="center").pack(expand=True)
+
     def create_footer(self, parent):
         """Create footer"""
         footer = tk.Frame(parent, bg='#46230a', height=60)
@@ -337,48 +309,21 @@ class StudentVerificationGUI:
         footer_text = "🪖 Helmet Check → 🔒 Fingerprint Scan → 📄 License Verification | ESC to exit"
         tk.Label(footer, text=footer_text, font=("Arial", 12), 
                 fg="#FFFFFF", bg='#46230a').pack(expand=True)
-    
+
     def show_user_info(self, user_info):
-        """Display user information"""
+        """Display user information in LEFT panel"""
         try:
-            self.initial_message.pack_forget()
-            
             # Clear previous details
             for widget in self.user_details_frame.winfo_children():
                 widget.destroy()
             
-            # Format name
-            name = user_info.get('name', 'Unknown')
-            if ',' in name:
-                parts = name.split(',')
-                if len(parts) >= 2:
-                    name = f"{parts[1].strip()} {parts[0].strip()}"
-            
-            # User type
-            user_type = user_info.get('user_type', 'STUDENT')
-            
             # Create info labels
             info_items = [
-                ("Name:", name),
-                ("Type:", user_type)
+                ("Name:", user_info.get('name', 'N/A')),
+                ("Student ID:", user_info.get('student_id', 'N/A')),
+                ("Course:", user_info.get('course', 'N/A')),
+                ("User Type:", user_info.get('user_type', 'STUDENT'))
             ]
-            
-            if user_type == 'STUDENT':
-                info_items.extend([
-                    ("Student ID:", user_info.get('student_id', 'N/A')),
-                    ("Course:", user_info.get('course', 'N/A'))
-                ])
-            else:  # STAFF
-                info_items.extend([
-                    ("Staff No:", user_info.get('staff_no', 'N/A')),
-                    ("Role:", user_info.get('staff_role', 'N/A'))
-                ])
-            
-            info_items.extend([
-                ("License:", user_info.get('license_number', 'N/A')),
-                ("Plate No:", user_info.get('plate_number', 'N/A')),
-                ("Confidence:", f"{user_info.get('confidence', 0)}%")
-            ])
             
             for label, value in info_items:
                 row = tk.Frame(self.user_details_frame, bg='#e3f2fd')
@@ -389,73 +334,32 @@ class StudentVerificationGUI:
                 tk.Label(row, text=value, font=("Arial", 12), 
                         fg="#1565c0", bg='#e3f2fd').pack(side="left", padx=(10, 0))
             
-            self.user_info_panel.pack(fill="x", pady=10)
+            # Show the user info panel
+            self.user_info_panel.pack(fill="x", pady=(20, 0))
         except Exception as e:
             print(f"Error showing user info: {e}")
-    
-    def show_verification_summary(self, results):
-        """Display verification summary"""
-        try:
-            # Clear previous summary
-            for widget in self.summary_frame.winfo_children():
-                widget.destroy()
-            
-            # Create summary items
-            checks = [
-                ("Helmet Verification", results.get('helmet', False)),
-                ("Fingerprint Authentication", results.get('fingerprint', False)),
-                ("License Expiration", results.get('license_valid', False)),
-                ("License Detection", results.get('license_detected', False)),
-                ("Name Matching", results.get('name_match', False))
-            ]
-            
-            for check_name, passed in checks:
-                row = tk.Frame(self.summary_frame, bg='#f5f5f5')
-                row.pack(fill="x", pady=5)
-                
-                # Icon
-                icon = "✅" if passed else "❌"
-                color = "#28a745" if passed else "#dc3545"
-                
-                tk.Label(row, text=icon, font=("Arial", 16), 
-                        fg=color, bg='#f5f5f5').pack(side="left")
-                
-                tk.Label(row, text=check_name, font=("Arial", 12), 
-                        fg="#333333", bg='#f5f5f5').pack(side="left", padx=(10, 0))
-                
-                status_text = "PASSED" if passed else "FAILED"
-                tk.Label(row, text=f"[{status_text}]", font=("Arial", 11, "bold"), 
-                        fg=color, bg='#f5f5f5').pack(side="right")
-            
-            self.summary_panel.pack(fill="x", pady=10)
-        except Exception as e:
-            print(f"Error showing verification summary: {e}")
-    
+
     def show_final_result(self, result):
-        """Show final verification result"""
+        """Show final verification result with improved design"""
         try:
             self.verification_complete = True
             
-            # Create overlay
-            overlay = tk.Frame(self.root, bg='#333333')
-            overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
-            
-            # Result box
-            result_box = tk.Frame(overlay, bg='white', relief='solid', bd=3)
+            # Result box with yellow background and improved styling
+            result_box = tk.Frame(self.root, bg='#FFD700', relief='raised', bd=4)
             result_box.place(relx=0.5, rely=0.5, anchor='center')
             
-            # Content
-            content = tk.Frame(result_box, bg='white')
-            content.pack(padx=60, pady=40)
+            # Content with improved spacing
+            content = tk.Frame(result_box, bg='#FFD700')
+            content.pack(padx=50, pady=35)
             
             if result.get('verified', False):
                 # Success
-                icon_label = tk.Label(content, text="✅", font=("Arial", 60), bg='white')
-                icon_label.pack()
+                icon_label = tk.Label(content, text="✅", font=("Arial", 50), bg='#FFD700')
+                icon_label.pack(pady=(0, 15))
                 
                 title = tk.Label(content, text="VERIFICATION SUCCESSFUL", 
-                               font=("Arial", 28, "bold"), fg="#28a745", bg='white')
-                title.pack(pady=(20, 10))
+                               font=("Arial", 24, "bold"), fg="#2E7D32", bg='#FFD700')
+                title.pack(pady=(0, 15))
                 
                 # Format name
                 name = result.get('name', 'User')
@@ -465,39 +369,37 @@ class StudentVerificationGUI:
                         name = f"{parts[1].strip()} {parts[0].strip()}"
                 
                 welcome = tk.Label(content, text=f"Welcome, {name}!", 
-                                 font=("Arial", 18), fg="#333333", bg='white')
-                welcome.pack(pady=10)
+                                 font=("Arial", 18, "bold"), fg="#1B5E20", bg='#FFD700')
+                welcome.pack(pady=(0, 10))
                 
-                # Time status
+                # Time action
                 time_action = result.get('time_action', 'IN')
-                time_color = "#28a745" if time_action == 'IN' else "#dc3545"
-                time_text = f"TIME {time_action} recorded at {result.get('timestamp', 'now')}"
+                action_text = f"Time {time_action}: {result.get('timestamp', 'N/A')}"
                 
-                time_label = tk.Label(content, text=time_text, 
-                                    font=("Arial", 16, "bold"), fg=time_color, bg='white')
-                time_label.pack(pady=10)
+                action_label = tk.Label(content, text=action_text, 
+                                       font=("Arial", 14), fg="#424242", bg='#FFD700')
+                action_label.pack(pady=(0, 5))
                 
             else:
                 # Failure
-                icon_label = tk.Label(content, text="❌", font=("Arial", 60), bg='white')
-                icon_label.pack()
+                icon_label = tk.Label(content, text="❌", font=("Arial", 50), bg='#FFD700')
+                icon_label.pack(pady=(0, 15))
                 
                 title = tk.Label(content, text="VERIFICATION FAILED", 
-                               font=("Arial", 28, "bold"), fg="#dc3545", bg='white')
-                title.pack(pady=(20, 10))
+                               font=("Arial", 24, "bold"), fg="#C62828", bg='#FFD700')
+                title.pack(pady=(0, 15))
                 
-                reason = result.get('reason', 'Verification requirements not met')
-                reason_label = tk.Label(content, text=reason, 
-                                      font=("Arial", 14), fg="#666666", bg='white', 
-                                      wraplength=400, justify="center")
-                reason_label.pack(pady=10)
+                reason = tk.Label(content, text=result.get('reason', 'Unknown error'), 
+                                font=("Arial", 16), fg="#424242", bg='#FFD700', wraplength=400)
+                reason.pack(pady=(0, 10))
             
-            # Auto close after 3 seconds
-            self.root.after(3000, self.close)
+            # Auto close
+            self.root.after(5000, self.close)
+            
         except Exception as e:
             print(f"Error showing final result: {e}")
             self.close()
-    
+
     def update_status(self, updates):
         """Update status from verification thread"""
         try:
@@ -513,12 +415,13 @@ class StudentVerificationGUI:
                 elif key == 'user_info':
                     self.show_user_info(value)
                 elif key == 'verification_summary':
-                    self.show_verification_summary(value)
+                    # Remove verification summary - just pass
+                    pass
                 elif key == 'final_result':
                     self.show_final_result(value)
         except Exception as e:
             print(f"Error updating status: {e}")
-    
+
     def start_verification(self):
         """Start verification in separate thread"""
         self.current_step.set("🚀 Initializing verification process...")
@@ -526,7 +429,7 @@ class StudentVerificationGUI:
         # Run verification in thread
         thread = threading.Thread(target=self.run_verification_thread, daemon=True)
         thread.start()
-    
+
     def run_verification_thread(self):
         """Run verification and update GUI"""
         try:
@@ -542,14 +445,14 @@ class StudentVerificationGUI:
                 'reason': f'Error: {str(e)}'
             }
             self.root.after(0, lambda: self.update_status({'final_result': error_result}))
-    
+
     def update_status_callback(self, status_dict):
         """Callback for status updates"""
         try:
             self.root.after(0, lambda: self.update_status(status_dict))
         except Exception as e:
             print(f"Error in callback: {e}")
-    
+
     def close(self):
         """Close the GUI"""
         try:
@@ -563,7 +466,7 @@ class StudentVerificationGUI:
             self.root.destroy()
         except Exception as e:
             print(f"Error closing GUI: {e}")
-    
+
     def run(self):
         """Run the GUI"""
         try:
