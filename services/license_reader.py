@@ -24,7 +24,7 @@ OCR_CONFIG_DETAILED = '--psm 4 --oem 3'
 OPTIMAL_WIDTH, OPTIMAL_HEIGHT = 1280, 960
 MIN_WIDTH, MIN_HEIGHT = 640, 480
 CACHE_DIR = "cache/ocr"
-MAX_CACHE_FILES = 10  # Increased from 5
+MAX_CACHE_FILES = 15
 
 VERIFICATION_KEYWORDS = [
     "REPUBLIC", "PHILIPPINES", "DEPARTMENT", "TRANSPORTATION", 
@@ -51,9 +51,10 @@ class NameInfo:
 def _get_cache_key(image_path: str) -> str:
     try:
         with open(image_path, 'rb') as f:
-            start = f.read(1024)
-            f.seek(-1024, 2)
-            end = f.read(1024)
+            # Sample more bytes for better uniqueness
+            start = f.read(2048)  # Increased from 1024
+            f.seek(-2048, 2)
+            end = f.read(2048)
             return hashlib.md5(start + end).hexdigest()
     except:
         return hashlib.md5(image_path.encode()).hexdigest()
@@ -111,27 +112,26 @@ def _resize_image_optimal(image: np.ndarray) -> np.ndarray:
     
     return cv2.resize(image, (new_w, new_h), interpolation=interpolation)
 
-def _preprocess_image(image: np.ndarray, method: str) -> np.ndarray:
+def _preprocess_image(image: np.ndarray, method: str = "standard") -> np.ndarray:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
     
     if method == "fast":
-        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        return thresh
+        return cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
     
     elif method == "standard":
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        enhanced = clahe.apply(gray)
-        denoised = cv2.bilateralFilter(enhanced, 5, 50, 50)
+        # FASTER: Use equalizeHist instead of CLAHE, medianBlur instead of bilateral
+        enhanced = cv2.equalizeHist(gray)
+        denoised = cv2.medianBlur(enhanced, 3)
         return cv2.adaptiveThreshold(denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
     
     else:  # detailed
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))  # Reduced complexity
         enhanced = clahe.apply(gray)
-        denoised = cv2.fastNlMeansDenoising(enhanced, None, 10, 7, 21)
-        kernel = np.ones((2, 2), np.uint8)
-        morph = cv2.morphologyEx(denoised, cv2.MORPH_CLOSE, kernel)
-        return cv2.adaptiveThreshold(morph, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 4)
-
+        # REMOVE: cv2.fastNlMeansDenoising() - this is the slowest operation!
+        kernel = np.ones((1, 1), np.uint8)  # Smaller kernel
+        morph = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, kernel)
+        return cv2.adaptiveThreshold(morph, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+        
 # ============== OCR PROCESSING ==============
 
 def _count_verification_keywords(text: str) -> int:
@@ -150,7 +150,7 @@ def _calculate_confidence_score(text: str, keywords_found: int) -> int:
     
     return min(100, int(base_score))
 
-def _extract_text_smart(image_path: str, is_guest: bool = False) -> str:
+def _extract_text_smart(image_path: str, is_guest: bool = False, reference_name: str = "") -> str:
     cache_method = "guest" if is_guest else "smart"
     cached_result = _get_cached_result(image_path, cache_method)
     if cached_result:
@@ -164,16 +164,27 @@ def _extract_text_smart(image_path: str, is_guest: bool = False) -> str:
         image = _resize_image_optimal(image)
         start_time = time.time()
         
-        methods = [
-            ("fast", OCR_CONFIG_FAST),
-            ("standard", OCR_CONFIG_STANDARD),
-            ("detailed", OCR_CONFIG_DETAILED)
-        ]
-        
+        # OPTIMIZATION: Smarter method selection
         if is_guest:
-            methods = methods[:2]  # Skip detailed for guests
+            methods = [
+                ("fast", OCR_CONFIG_FAST),
+                ("standard", OCR_CONFIG_STANDARD)
+            ]
             min_keywords_needed, min_confidence_needed = 1, 40
         else:
+            # For students/staff with reference_name - prioritize speed
+            if reference_name:
+                methods = [
+                    ("fast", OCR_CONFIG_FAST),
+                    ("standard", OCR_CONFIG_STANDARD),
+                    ("detailed", OCR_CONFIG_DETAILED)  # Only if needed
+                ]
+            else:
+                methods = [
+                    ("fast", OCR_CONFIG_FAST),
+                    ("standard", OCR_CONFIG_STANDARD),
+                    ("detailed", OCR_CONFIG_DETAILED)
+                ]
             min_keywords_needed, min_confidence_needed = MIN_KEYWORDS_FOR_SUCCESS, MIN_CONFIDENCE_SCORE
         
         best_text, best_score = "", 0
@@ -190,10 +201,17 @@ def _extract_text_smart(image_path: str, is_guest: bool = False) -> str:
                     best_score = confidence
                     best_text = text
                 
+                # OPTIMIZATION: Early success for students/staff with name matching
+                if not is_guest and reference_name and keywords_found >= 2 and confidence >= 60:
+                    print(f"⚡ Fast success for {reference_name}: {keywords_found} keywords")
+                    break
+                
+                # Standard early exit conditions
                 if keywords_found >= min_keywords_needed and confidence >= min_confidence_needed:
                     break
                 
-                timeout = 6 if is_guest else 8
+                # Timeout check
+                timeout = 4 if is_guest else 5  # Reduced timeouts
                 if time.time() - start_time > timeout:
                     break
                     
@@ -205,7 +223,7 @@ def _extract_text_smart(image_path: str, is_guest: bool = False) -> str:
         
     except Exception as e:
         return f"Error extracting text: {str(e)}"
-
+        
 # ============== IMAGE QUALITY CHECKS ==============
 
 def _check_image_quality(image: np.ndarray) -> bool:
@@ -1069,63 +1087,78 @@ def licenseRead(image_path: str, fingerprint_info: dict) -> NameInfo:
         safe_delete_temp_file(image_path)
 
 def licenseReadGuest(image_path: str, guest_info: dict) -> NameInfo:
-    guest_name = guest_info['name']
+    reference_name = guest_info['name']  # Use guest name as reference
+    current_image_path = image_path
     
     try:
-        guest_extraction = extract_guest_name_from_license_simple(image_path)
-        detected_name = guest_extraction.get('Name', 'Guest User')
-        document_status = guest_extraction.get('Document Verified', 'Document Detected')
-        
-        final_name = guest_name
-        
-        if detected_name and detected_name != "Guest User" and detected_name != guest_name:
-            final_name = guest_name  # Use provided name for consistency
-        
-        basic_text = _extract_text_smart(image_path, is_guest=True)
-        
-        packaged = NameInfo(
-            document_type="Driver's License",
-            name=final_name,
-            document_verified=document_status,
-            formatted_text=format_text_output(basic_text),
-            fingerprint_info=None
-        )
-
-        keywords_found = _count_verification_keywords(basic_text.upper())
-        is_verified = keywords_found >= 1
-        
-        if not is_verified and _retake_prompt("Valid License Document", "Insufficient License Keywords"):
-            retake_image_path = auto_capture_license_rpi("Guest License", None, retry_mode=True)
+        while True:
+            basic_text = extract_text_from_image(current_image_path)
+            ocr_lines = [line.strip() for line in basic_text.splitlines() if line.strip()]
+            name_from_ocr, sim_score = find_best_line_match(reference_name, ocr_lines)
+            
+            # Use the same enhanced verification as student/staff
+            structured_data = extract_name_from_lines(current_image_path, reference_name, name_from_ocr, sim_score)
+            
+            # Create guest-specific fingerprint_info for compatibility
+            guest_fingerprint_info = {
+                'name': reference_name,
+                'confidence': 100,  # High confidence since it's user-provided
+                'user_type': 'GUEST'
+            }
+            
+            packaged = package_name_info(structured_data, basic_text, guest_fingerprint_info)
+            packaged.match_score = sim_score
+            
+            detected_name = packaged.name
+            
+            # Check name matching (same logic as student/staff)
+            exact_match = (detected_name.lower() == reference_name.lower())
+            high_similarity = sim_score and sim_score >= 0.65
+            
+            ref_words = set(reference_name.lower().split())
+            det_words = set(detected_name.lower().split())
+            word_overlap_ratio = len(ref_words.intersection(det_words)) / len(ref_words) if ref_words else 0
+            substantial_overlap = word_overlap_ratio >= 0.7
+            
+            name_matches = (detected_name != "Not Found" and (exact_match or high_similarity or substantial_overlap))
+            
+            if name_matches:
+                print(f"🎯 Guest name match found: {reference_name} ↔ {detected_name} ({sim_score*100:.1f}%)")
+                return packaged
+            
+            # If no match, offer retake (same as student/staff)
+            if not _retake_prompt(reference_name, detected_name):
+                return packaged
+            
+            if current_image_path != image_path:
+                safe_delete_temp_file(current_image_path)
+            
+            # Create guest-specific retry info
+            guest_retry_info = {
+                'name': reference_name,
+                'user_type': 'GUEST',
+                'confidence': 100
+            }
+            
+            retake_image_path = auto_capture_license_rpi(reference_name, guest_retry_info, retry_mode=True)
             
             if retake_image_path:
-                retake_extraction = extract_guest_name_from_license_simple(retake_image_path)
-                retake_text = _extract_text_smart(retake_image_path, is_guest=True)
-                retake_document_status = retake_extraction.get('Document Verified', 'Document Detected')
-                
-                retake_packaged = NameInfo(
-                    document_type="Driver's License",
-                    name=final_name,
-                    document_verified=retake_document_status,
-                    formatted_text=format_text_output(retake_text),
-                    fingerprint_info=None
-                )
-                
-                safe_delete_temp_file(retake_image_path)
-                return retake_packaged
+                current_image_path = retake_image_path
+            else:
+                return packaged
         
-        return packaged
-
     except Exception:
-        return NameInfo(
-            document_type="Driver's License",
-            name=guest_name,
-            document_verified="Processing Failed",
-            formatted_text="Processing failed",
-            fingerprint_info=None
+        error_packaged = package_name_info(
+            {"Name": "Not Found", "Document Verified": "Failed"}, 
+            "Processing failed", guest_fingerprint_info
         )
+        error_packaged.match_score = 0.0
+        return error_packaged
     finally:
+        if current_image_path != image_path:
+            safe_delete_temp_file(current_image_path)
         safe_delete_temp_file(image_path)
-
+        
 def get_guest_name_from_license_image(image_path: str) -> str:
     try:
         extraction = extract_guest_name_from_license_simple(image_path)
@@ -1184,8 +1217,21 @@ def complete_verification_flow(image_path: str, fingerprint_info: dict,
 def complete_guest_verification_flow(image_path: str, guest_info: dict,
                                    helmet_verified: bool = True) -> bool:
     license_result = licenseReadGuest(image_path, guest_info)
+    
+    final_name = license_result.name
+    final_match_score = license_result.match_score or 0.0
     final_document_status = license_result.document_verified
-    license_detected = "Driver's License Detected" in final_document_status
+    
+    # Check if license is detected (including name match override)
+    license_detected = ("Driver's License Detected" in final_document_status or 
+                       "Name Match Override" in final_document_status)
+    
+    name_matching_verified = final_match_score > 0.65
+    
+    # If names match, force license detection to be true (same as student/staff)
+    if name_matching_verified:
+        license_detected = True
+        print(f"🎯 Guest name match override: License detection forced to TRUE")
     
     guest_verified = helmet_verified and license_detected
     
@@ -1193,13 +1239,14 @@ def complete_guest_verification_flow(image_path: str, guest_info: dict,
     print("🎯 GUEST VERIFICATION")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print(f"🪖 Helmet: {'✅' if helmet_verified else '❌'}")
-    print(f"🆔 License: {'✅' if license_detected else '❌'}")
-    print(f"👤 Guest: {guest_info['name']}")
-    print(f"🟢 STATUS: {'✅ GUEST VERIFIED' if guest_verified else '❌ GUEST DENIED'}")
+    print(f"🆔 License Detected: {'✅' if license_detected else '❌'}" + 
+          (" (Name Match Override)" if name_matching_verified and license_detected else ""))
+    print(f"👤 Name Match: {'✅' if name_matching_verified else '❌'} ({final_match_score*100:.1f}%)")
+    print(f"🟢 STATUS: {'✅ GUEST VERIFIED' if guest_verified else '❌ GUEST VERIFICATION FAILED'}")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
     return guest_verified
-
+    
 # ============== UTILITY FUNCTIONS ==============
 
 def print_summary(packaged: NameInfo, fingerprint_info: Optional[dict] = None, structured_data: Optional[Dict[str, str]] = None, 

@@ -363,13 +363,13 @@ def admin_sync_database():
             try:
                 # Extract data from row
                 full_name = row.get('Full Name', '').strip()
-                license_number = row.get('License Number', '').strip()
+                license_number = str(row.get('License Number', '')).strip()
                 expiration_date = row.get('License Expiration Date', '').strip()
                 plate_number = row.get('Plate Number of the Motorcycle', '').strip()
                 course = row.get('Course', '').strip()
                 student_id = row.get('Student No.', '').strip()
                 staff_role = row.get('Staff Role', '').strip()
-                staff_no = row.get('Staff No.', '').strip()
+                staff_no = str(row.get('Staff No.', '')).strip()
                 
                 # Skip if no name
                 if not full_name:
