@@ -157,6 +157,54 @@ def verify_database_integrity() -> bool:
         print(f"❌ Error checking database integrity: {e}")
         return False
         
+def create_office_management_table():
+    """Create office management table with security codes"""
+    try:
+        import sqlite3
+        from database.init_database import MOTORPASS_DB
+        
+        conn = sqlite3.connect(MOTORPASS_DB)
+        cursor = conn.cursor()
+        
+        # Create offices table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS offices (
+                office_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                office_name TEXT UNIQUE NOT NULL,
+                office_code TEXT NOT NULL,
+                is_active BOOLEAN DEFAULT 1,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Insert default offices with random 3-digit codes
+        default_offices = [
+            ("IT Department", "248"),
+            ("SDO Office", "573"),
+            ("Library", "691"),
+            ("Registrar", "314"),
+            ("CSS Department", "827"),
+            ("Dean's Office", "459"),
+            ("Cashier Office", "136"),
+            ("Main Office", "705")
+        ]
+        
+        for office_name, code in default_offices:
+            cursor.execute('''
+                INSERT OR IGNORE INTO offices (office_name, office_code)
+                VALUES (?, ?)
+            ''', (office_name, code))
+        
+        conn.commit()
+        conn.close()
+        print("✅ Office management table created successfully")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error creating office table: {e}")
+        return False
+        
 # =================== DATABASE STATISTICS ===================
 
 def get_database_stats() -> Dict:

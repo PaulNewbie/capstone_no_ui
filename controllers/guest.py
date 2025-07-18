@@ -1,4 +1,4 @@
-# controllers/guest.py - Fixed with proper camera cleanup
+# controllers/guest.py - With security code verification for timeout and retake for timing in
 
 from services.license_reader import *
 from services.helmet_infer import verify_helmet
@@ -7,6 +7,7 @@ from services.buzzer_control import *
 from services.rpi_camera import force_camera_cleanup
 from utils.display_helpers import display_separator, display_verification_result
 from utils.gui_helpers import show_results_gui, get_guest_info_gui, updated_guest_office_gui
+from utils.timeout_security import timeout_security_verification  # Import security verification
 import difflib
 import time
 
@@ -34,7 +35,7 @@ def guest_verification():
     gui.run()
 
 def run_guest_verification_with_gui(status_callback):
-    """Run guest verification steps with GUI status updates - Smart cleanup"""
+    """Run guest verification steps with GUI status updates - Security for timeout, retake for timing in"""
     
     # Initialize systems
     init_buzzer()
@@ -64,7 +65,7 @@ def run_guest_verification_with_gui(status_callback):
             # No camera cleanup needed
             return {'verified': False, 'reason': 'Helmet verification failed'}
         
-        # Step 2: License capture and guest info (with retake loop)
+        # Step 2: License capture and guest info (with retake loop for new guests)
         while True:  # Loop to handle retake requests
             # License capture
             status_callback({'current_step': '📄 Capturing license... (Check terminal for camera)'})
@@ -100,64 +101,90 @@ def run_guest_verification_with_gui(status_callback):
             current_status, guest_info = get_guest_time_status(detected_name)
             
             if current_status == 'IN':
-                # Process TIME OUT for returning guest - no retake needed here
+                # TIMEOUT PROCESS - Use security code verification (NO retake here)
+                print(f"🔍 Found guest '{guest_info['name']}' currently IN")
+                print(f"📄 Detected name: '{detected_name}'")
+                print(f"🤔 Match confidence: {guest_info.get('similarity_score', 0)*100:.1f}%")
+                
+                status_callback({'current_step': '🔐 Security verification required for timeout...'})
+                
+                # Show guest info
                 status_callback({
                     'guest_info': {
                         'name': guest_info['name'],
                         'guest_number': guest_info['guest_number'],
                         'plate_number': guest_info['plate_number'],
                         'office': guest_info['office'],
-                        'status': 'GUEST TIME OUT'
+                        'status': 'GUEST TIMEOUT - SECURITY CHECK'
                     }
                 })
                 
-                # Verify guest
-                is_guest_verified = complete_guest_verification_flow(
-                    image_path=image_path,
-                    guest_info=guest_info,
-                    helmet_verified=True
-                )
+                # SECURITY CODE VERIFICATION - No confirmation dialog, straight to security
+                security_verified = timeout_security_verification(guest_info)
                 
-                if is_guest_verified:
-                    time_result = process_guest_time_out(guest_info)
+                if security_verified:
+                    # Security code verified - proceed with TIME OUT
+                    print("✅ Security code verified - proceeding with TIME OUT")
                     
-                    if time_result['success']:
-                        timestamp = time.strftime('%H:%M:%S')
-                        status_callback({'current_step': f'✅ TIME OUT recorded at {timestamp}'})
-                        set_led_success(duration=5.0)
-                        play_success()
+                    status_callback({'current_step': '🔍 Verifying license for timeout...'})
+                    
+                    # Verify guest and process time out
+                    is_guest_verified = complete_guest_verification_flow(
+                        image_path=image_path,
+                        guest_info=guest_info,
+                        helmet_verified=True
+                    )
+                    
+                    if is_guest_verified:
+                        time_result = process_guest_time_out(guest_info)
                         
-                        # Show verification summary
-                        status_callback({
-                            'verification_summary': {
-                                'helmet': True,
-                                'license': True
+                        if time_result['success']:
+                            timestamp = time.strftime('%H:%M:%S')
+                            status_callback({'current_step': f'✅ TIME OUT recorded at {timestamp}'})
+                            set_led_success(duration=5.0)
+                            play_success()
+                            
+                            # Show verification summary
+                            status_callback({
+                                'verification_summary': {
+                                    'helmet': True,
+                                    'license': True
+                                }
+                            })
+                            
+                            result = {
+                                'verified': True,
+                                'name': guest_info['name'],
+                                'time_action': 'OUT',
+                                'timestamp': timestamp,
+                                'guest_number': guest_info['guest_number']
                             }
-                        })
-                        
-                        result = {
-                            'verified': True,
-                            'name': guest_info['name'],
-                            'time_action': 'OUT',
-                            'timestamp': timestamp,
-                            'guest_number': guest_info['guest_number']
-                        }
+                        else:
+                            status_callback({'current_step': '❌ Failed to record TIME OUT'})
+                            set_led_idle()
+                            play_failure()
+                            result = {'verified': False, 'reason': 'Failed to record TIME OUT'}
                     else:
-                        status_callback({'current_step': '❌ Failed to record TIME OUT'})
+                        status_callback({'current_step': '❌ Guest verification failed'})
                         set_led_idle()
                         play_failure()
-                        result = {'verified': False, 'reason': 'Failed to record TIME OUT'}
+                        result = {'verified': False, 'reason': 'License verification failed'}
+                        
+                    cleanup_buzzer()
+                    return result
+                
                 else:
-                    status_callback({'current_step': '❌ Guest verification failed'})
+                    # Security verification failed or cancelled
+                    print("❌ Security verification failed or cancelled")
+                    status_callback({'current_step': '❌ Security verification failed - Timeout DENIED'})
+                    safe_delete_temp_file(image_path)
                     set_led_idle()
                     play_failure()
-                    result = {'verified': False, 'reason': 'License verification failed'}
-                    
-                cleanup_buzzer()
-                return result
-                
+                    cleanup_buzzer()
+                    return {'verified': False, 'reason': 'Security verification failed'}
+            
             else:
-                # New guest TIME IN - this is where the retake functionality is needed
+                # NEW GUEST TIME IN - This is where the retake functionality works
                 status_callback({
                     'guest_info': {
                         'name': detected_name if detected_name != "Guest" else "New Guest",
@@ -167,13 +194,13 @@ def run_guest_verification_with_gui(status_callback):
                 
                 status_callback({'current_step': '📝 Please provide guest information...'})
                 
-                # Get guest info (using GUI dialog) - UPDATED TO HANDLE RETAKE
+                # Get guest info (using GUI dialog) - HANDLES RETAKE FROM REGISTRATION FORM
                 guest_info_input = get_guest_info_gui(detected_name)
                 
                 # Handle the different return values
                 if guest_info_input == 'retake':
                     # User wants to retake license - clean up current image and continue loop
-                    print("📷 User requested license retake")
+                    print("📷 User requested license retake from registration form")
                     status_callback({'current_step': '🔄 Retaking license scan...'})
                     safe_delete_temp_file(image_path)
                     continue  # Go back to the beginning of the while loop

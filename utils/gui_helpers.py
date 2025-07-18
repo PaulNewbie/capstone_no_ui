@@ -4,16 +4,7 @@ from tkinter import ttk, messagebox, simpledialog
 import os
 
 def show_results_gui(title, image=None, text="", success=True, details=None):
-    """
-    Display results in a GUI window
-    
-    Args:
-        title (str): Window title
-        image (np.array or None): Image to display (OpenCV format)
-        text (str): Text message to display
-        success (bool): Whether the operation was successful
-        details (dict or None): Additional details to display
-    """
+    """Display results in a GUI window"""
     # Create results window
     results_window = tk.Toplevel()
     results_window.title(title)
@@ -31,7 +22,7 @@ def show_results_gui(title, image=None, text="", success=True, details=None):
     main_frame.pack(fill="both", expand=True, padx=20, pady=20)
     
     # Title label
-    title_color = "#008000" if success else "#FF0000"  # Green for success, red for failure
+    title_color = "#008000" if success else "#FF0000"
     title_label = tk.Label(main_frame, 
                           text=title,
                           font=("Arial", 18, "bold"),
@@ -50,7 +41,7 @@ def show_results_gui(title, image=None, text="", success=True, details=None):
                              justify="center")
         text_label.pack(pady=(0, 20))
     
-    # Details section (if provided)
+    # Details section
     if details:
         details_frame = tk.LabelFrame(main_frame, 
                                     text="Details",
@@ -69,11 +60,10 @@ def show_results_gui(title, image=None, text="", success=True, details=None):
                                   anchor="w")
             detail_label.pack(fill="x", padx=10, pady=2)
     
-    # Buttons frame
+    # OK button
     button_frame = tk.Frame(main_frame, bg="#FFFFFF")
     button_frame.pack(fill="x", pady=(20, 0))
     
-    # OK button
     ok_button = tk.Button(button_frame,
                          text="OK",
                          font=("Arial", 12, "bold"),
@@ -87,115 +77,152 @@ def show_results_gui(title, image=None, text="", success=True, details=None):
     # Make window modal
     results_window.transient()
     results_window.grab_set()
-    
-    # Wait for window to close
     results_window.wait_window()
 
-def show_error_gui(title, error_message, details=None):
-    """
-    Display error message in a GUI window
-    """
-    show_results_gui(
-        title=title,
-        text=error_message,
-        success=False,
-        details={"Error Details": details} if details else None
-    )
-
-def show_success_gui(title, message, image=None, details=None):
-    """
-    Display success message in a GUI window
-    """
-    show_results_gui(
-        title=title,
-        text=message,
-        image=image,
-        success=True,
-        details=details
-    )
-
 def get_guest_info_gui(detected_name=""):
-    """
-    Get guest information through a GUI form
+    """Enhanced guest info GUI with office buttons, mouse support, AND retake functionality"""
+    # Try to import office operations
+    try:
+        from database.office_operations import get_all_offices
+        offices_data = get_all_offices()
+        use_office_buttons = True
+    except ImportError:
+        offices_data = []
+        use_office_buttons = False
     
-    Args:
-        detected_name (str): Pre-detected name from license
-        
-    Returns:
-        dict or None: Guest information or None if cancelled
-        str: 'retake' if user wants to retake license scan
-    """
-    # Create input window
+    # Create window
     info_window = tk.Toplevel()
-    info_window.title("Guest Information")
-    info_window.geometry("500x400")
+    info_window.title("Guest Registration")
+    
+    if use_office_buttons and offices_data:
+        info_window.geometry("600x500")
+    else:
+        info_window.geometry("500x400")
+    
     info_window.configure(bg="#FFFFFF")
     
-    # Center the window
+    # Center window
     info_window.update_idletasks()
-    x = (info_window.winfo_screenwidth() // 2) - (500 // 2)
-    y = (info_window.winfo_screenheight() // 2) - (400 // 2)
-    info_window.geometry(f"500x400+{x}+{y}")
+    x = (info_window.winfo_screenwidth() // 2) - (300 if use_office_buttons else 250)
+    y = (info_window.winfo_screenheight() // 2) - (250 if use_office_buttons else 200)
+    
+    if use_office_buttons and offices_data:
+        info_window.geometry(f"600x500+{x}+{y}")
+    else:
+        info_window.geometry(f"500x400+{x}+{y}")
     
     # Main frame
     main_frame = tk.Frame(info_window, bg="#FFFFFF")
     main_frame.pack(fill="both", expand=True, padx=20, pady=20)
     
     # Title
-    title_label = tk.Label(main_frame,
-                          text="Guest Registration",
-                          font=("Arial", 16, "bold"),
-                          fg="#333333",
-                          bg="#FFFFFF")
+    title_label = tk.Label(main_frame, text="🎫 GUEST REGISTRATION", 
+                          font=("Arial", 18, "bold"), fg="#333333", bg="#FFFFFF")
     title_label.pack(pady=(0, 20))
-    
-    # Result variable
-    result = [None]  # Use list to modify from inner function
     
     # Name field
     tk.Label(main_frame, text="Full Name:", font=("Arial", 10, "bold"), bg="#FFFFFF").pack(anchor="w", pady=(0, 5))
-    name_entry = tk.Entry(main_frame, font=("Arial", 10), width=40)
+    name_entry = tk.Entry(main_frame, font=("Arial", 12), width=50)
     name_entry.pack(pady=(0, 15), fill="x")
     if detected_name:
         name_entry.insert(0, detected_name)
     
     # Plate number field
     tk.Label(main_frame, text="Plate Number:", font=("Arial", 10, "bold"), bg="#FFFFFF").pack(anchor="w", pady=(0, 5))
-    plate_entry = tk.Entry(main_frame, font=("Arial", 10), width=40)
-    plate_entry.pack(pady=(0, 15), fill="x")
+    plate_entry = tk.Entry(main_frame, font=("Arial", 12), width=50)
+    plate_entry.pack(pady=(0, 20), fill="x")
     
-    # Office field
-    tk.Label(main_frame, text="Office to Visit:", font=("Arial", 10, "bold"), bg="#FFFFFF").pack(anchor="w", pady=(0, 5))
-    office_var = tk.StringVar(value="CSS Office")
-    office_combo = ttk.Combobox(main_frame, 
-                               textvariable=office_var,
-                               font=("Arial", 10),
-                               width=37,
-                               values=[
-                                   "CSS Office",
-                                   "Registrar Office", 
-                                   "Cashier Office",
-                                   "Dean's Office",
-                                   "Library",
-                                   "IT Office",
-                                   "Main Office",
-                                   "Other"
-                               ])
-    office_combo.pack(pady=(0, 20), fill="x")
+    # Office selection
+    tk.Label(main_frame, text="Select Office to Visit:", font=("Arial", 10, "bold"), bg="#FFFFFF").pack(anchor="w", pady=(0, 10))
+    
+    selected_office = tk.StringVar()
+    
+    if use_office_buttons and offices_data:
+        # OFFICE BUTTONS (Enhanced with mouse support)
+        office_frame = tk.Frame(main_frame, bg="#FFFFFF")
+        office_frame.pack(fill="x", pady=(0, 20))
+        
+        # Create buttons in grid layout
+        buttons_per_row = 3
+        button_widgets = []
+        
+        for i, office in enumerate(offices_data):
+            row = i // buttons_per_row
+            col = i % buttons_per_row
+            
+            def make_select_office(office_name):
+                def select_office():
+                    selected_office.set(office_name)
+                    # Update button colors
+                    for btn_widget in button_widgets:
+                        if btn_widget['text'] == office_name:
+                            btn_widget.config(bg="#4CAF50", fg="white")
+                        else:
+                            btn_widget.config(bg="#f0f0f0", fg="black")
+                return select_office
+            
+            btn = tk.Button(office_frame, text=office['office_name'], 
+                           font=("Arial", 9), width=18, height=2,
+                           bg="#f0f0f0", fg="black", relief="raised", bd=2,
+                           cursor="hand2",  # Add cursor
+                           command=make_select_office(office['office_name']))
+            btn.grid(row=row, column=col, padx=5, pady=5, sticky="ew")
+            button_widgets.append(btn)
+            
+            # Add hover effects
+            def on_enter(e, button=btn):
+                if button['bg'] != "#4CAF50":  # Don't change if selected
+                    button.config(bg="#e0e0e0")
+            
+            def on_leave(e, button=btn):
+                if button['bg'] != "#4CAF50":  # Don't change if selected
+                    button.config(bg="#f0f0f0")
+            
+            btn.bind("<Enter>", on_enter)
+            btn.bind("<Leave>", on_leave)
+        
+        # Configure grid weights
+        for i in range(buttons_per_row):
+            office_frame.grid_columnconfigure(i, weight=1)
+    
+    else:
+        # FALLBACK DROPDOWN (if office buttons not available)
+        office_var = tk.StringVar(value="CSS Office")
+        office_combo = ttk.Combobox(main_frame, 
+                                   textvariable=office_var,
+                                   font=("Arial", 10),
+                                   width=47,
+                                   values=[
+                                       "CSS Office",
+                                       "Registrar Office", 
+                                       "Cashier Office",
+                                       "Dean's Office",
+                                       "Library",
+                                       "IT Office",
+                                       "Main Office",
+                                       "Other"
+                                   ])
+        office_combo.pack(pady=(0, 20), fill="x")
+        selected_office = office_var  # Use the same variable
+    
+    result = [None]
     
     def submit_info():
         name = name_entry.get().strip()
         plate = plate_entry.get().strip().upper()
-        office = office_var.get().strip()
+        office = selected_office.get()
         
         if not name:
             messagebox.showerror("Error", "Name is required!")
+            name_entry.focus()
             return
         if not plate:
             messagebox.showerror("Error", "Plate number is required!")
+            plate_entry.focus()
             return
         if not office:
-            office = "CSS Office"
+            messagebox.showerror("Error", "Please select an office to visit!")
+            return
             
         result[0] = {
             'name': name,
@@ -208,71 +235,48 @@ def get_guest_info_gui(detected_name=""):
         result[0] = None
         info_window.destroy()
     
-    def retake_license():
+    def retake():
+        """RESTORED retake function"""
         result[0] = 'retake'
         info_window.destroy()
     
-    # Buttons frame
+    # Bottom buttons
     button_frame = tk.Frame(main_frame, bg="#FFFFFF")
-    button_frame.pack(fill="x", pady=(10, 0))
+    button_frame.pack(fill="x", pady=(20, 0))
     
     # Cancel button (left)
-    cancel_button = tk.Button(button_frame,
-                             text="Cancel",
-                             font=("Arial", 10, "bold"),
-                             bg="#FF6B6B",
-                             fg="white",
-                             padx=20,
-                             pady=8,
-                             relief="raised",
-                             cursor="hand2",
-                             command=cancel)
+    cancel_button = tk.Button(button_frame, text="❌ Cancel", 
+                             font=("Arial", 10, "bold"), bg="#FF6B6B", fg="white",
+                             padx=20, pady=8, command=cancel, cursor="hand2")
     cancel_button.pack(side="left")
     
-    # Retake License button (center) - NEW BUTTON ADDED HERE
-    retake_button = tk.Button(button_frame,
-                             text="📷 Retake License",
-                             font=("Arial", 10, "bold"),
-                             bg="#3498DB",
-                             fg="white",
-                             padx=20,
-                             pady=8,
-                             relief="raised",
-                             cursor="hand2",
-                             command=retake_license)
+    # RESTORED RETAKE BUTTON (center)
+    retake_button = tk.Button(button_frame, text="📷 Retake License", 
+                             font=("Arial", 10, "bold"), bg="#3498DB", fg="white",
+                             padx=20, pady=8, command=retake, cursor="hand2")
     retake_button.pack(side="left", padx=(10, 0))
     
     # Submit button (right)
-    submit_button = tk.Button(button_frame,
-                             text="Submit",
-                             font=("Arial", 10, "bold"),
-                             bg="#4CAF50",
-                             fg="white",
-                             padx=20,
-                             pady=8,
-                             relief="raised",
-                             cursor="hand2",
-                             command=submit_info)
+    submit_button = tk.Button(button_frame, text="✅ Register Guest", 
+                             font=("Arial", 10, "bold"), bg="#4CAF50", fg="white",
+                             padx=20, pady=8, command=submit_info, cursor="hand2")
     submit_button.pack(side="right")
     
-    # Test button functionality
-    print("🔧 Button commands configured:")
-    print(f"   Cancel: {cancel_button['command']}")
-    print(f"   Retake: {retake_button['command']}")
-    print(f"   Submit: {submit_button['command']}")
+    # Keyboard support
+    def on_key_press(event):
+        if event.keysym == 'Return':
+            submit_info()
+        elif event.keysym == 'Escape':
+            cancel()
     
-    # Force button update
-    cancel_button.update()
-    retake_button.update()
-    submit_button.update()
+    info_window.bind('<Key>', on_key_press)
+    info_window.focus_set()
     
-    # Focus on name field initially, but allow button focus
-    name_entry.focus_set()
+    # Tab navigation
+    name_entry.bind('<Tab>', lambda e: plate_entry.focus())
+    plate_entry.bind('<Tab>', lambda e: submit_button.focus())
     
-    # Remove automatic Enter key binding to submit
-    # Let users click buttons manually to avoid accidents
-    
-    # Handle window close button (X) - Fix cancel functionality
+    # Window close handler
     def on_window_close():
         result[0] = None
         info_window.destroy()
@@ -282,21 +286,16 @@ def get_guest_info_gui(detected_name=""):
     # Make window modal
     info_window.transient()
     info_window.grab_set()
+    
+    # Focus on name entry
+    name_entry.focus()
+    
     info_window.wait_window()
     
     return result[0]
      
 def updated_guest_office_gui(guest_name, current_office):
-    """
-    Get updated office information for returning guest
-    
-    Args:
-        guest_name (str): Guest name
-        current_office (str): Current office on record
-        
-    Returns:
-        dict or None: Updated guest info or None if cancelled
-    """
+    """Get updated office information for returning guest"""
     # Create update window
     update_window = tk.Toplevel()
     update_window.title("Update Guest Office")
@@ -305,8 +304,8 @@ def updated_guest_office_gui(guest_name, current_office):
     
     # Center the window
     update_window.update_idletasks()
-    x = (update_window.winfo_screenwidth() // 2) - (400 // 2)
-    y = (update_window.winfo_screenheight() // 2) - (300 // 2)
+    x = (update_window.winfo_screenwidth() // 2) - (200)
+    y = (update_window.winfo_screenheight() // 2) - (150)
     update_window.geometry(f"400x300+{x}+{y}")
     
     # Main frame
@@ -383,6 +382,7 @@ def updated_guest_office_gui(guest_name, current_office):
                              fg="white",
                              padx=20,
                              pady=8,
+                             cursor="hand2",
                              command=cancel)
     cancel_button.pack(side="left")
     
@@ -393,11 +393,21 @@ def updated_guest_office_gui(guest_name, current_office):
                              fg="white",
                              padx=20,
                              pady=8,
+                             cursor="hand2",
                              command=update_info)
     update_button.pack(side="right")
     
     # Focus on office combo
     office_combo.focus()
+    
+    # Keyboard support
+    def on_key_press(event):
+        if event.keysym == 'Return':
+            update_info()
+        elif event.keysym == 'Escape':
+            cancel()
+    
+    update_window.bind('<Key>', on_key_press)
     
     # Make window modal
     update_window.transient()
@@ -406,50 +416,288 @@ def updated_guest_office_gui(guest_name, current_office):
     
     return result[0]
 
+# Add other helper functions (same as before)
+def show_error_gui(title, error_message, details=None):
+    """Display error message in a GUI window"""
+    show_results_gui(
+        title=title,
+        text=error_message,
+        success=False,
+        details={"Error Details": details} if details else None
+    )
+
+def show_success_gui(title, message, image=None, details=None):
+    """Display success message in a GUI window"""
+    show_results_gui(
+        title=title,
+        text=message,
+        image=image,
+        success=True,
+        details=details
+    )
+
 def show_message_gui(message, title="MotorPass", message_type="info"):
-    """
-    Show a message in a GUI dialog
-    
-    Args:
-        message (str): Message to display
-        title (str): Dialog title
-        message_type (str): Type of message ('info', 'warning', 'error', 'success')
-    """
+    """Show a message in a GUI dialog"""
     if message_type.lower() == "error":
         messagebox.showerror(title, message)
     elif message_type.lower() == "warning":
         messagebox.showwarning(title, message)
     elif message_type.lower() == "success":
         messagebox.showinfo(title, f"✅ {message}")
-    else:  # default to info
+    else:
         messagebox.showinfo(title, message)
 
 def get_user_input_gui(prompt, title="Input Required", default_value=""):
-    """
-    Get user input through a GUI dialog
-    
-    Args:
-        prompt (str): Prompt message
-        title (str): Dialog title
-        default_value (str): Default value
-        
-    Returns:
-        str or None: User input or None if cancelled
-    """
+    """Get user input through a GUI dialog"""
     return simpledialog.askstring(title, prompt, initialvalue=default_value)
 
 def confirm_action_gui(message, title="Confirm Action"):
+    """Show a confirmation dialog"""
+    return messagebox.askyesno(title, message)
+    
+def guest_timeout_confirmation_dialog(guest_info):
     """
-    Show a confirmation dialog
+    Show confirmation dialog for guest time-out
     
     Args:
-        message (str): Confirmation message
-        title (str): Dialog title
+        guest_info (dict): Guest information found in database
         
     Returns:
-        bool: True if confirmed, False otherwise
+        str: 'timeout' to proceed, 'new_guest' for new registration, 'retake' for retake, 'cancel' to cancel
     """
-    return messagebox.askyesno(title, message)
+    # Create dialog window
+    dialog_window = tk.Toplevel()
+    dialog_window.title("Guest Found - Confirm Action")
+    dialog_window.geometry("600x450")
+    dialog_window.configure(bg="#FFFFFF")
+    dialog_window.resizable(False, False)
+    
+    # Center the window
+    dialog_window.update_idletasks()
+    x = (dialog_window.winfo_screenwidth() // 2) - (600 // 2)
+    y = (dialog_window.winfo_screenheight() // 2) - (450 // 2)
+    dialog_window.geometry(f"600x450+{x}+{y}")
+    
+    # Make window modal and stay on top
+    dialog_window.transient()
+    dialog_window.grab_set()
+    dialog_window.attributes('-topmost', True)
+    
+    # Main container
+    main_frame = tk.Frame(dialog_window, bg="#FFFFFF", padx=25, pady=25)
+    main_frame.pack(fill="both", expand=True)
+    
+    # Title with icon
+    title_frame = tk.Frame(main_frame, bg="#FFFFFF")
+    title_frame.pack(fill="x", pady=(0, 20))
+    
+    title_label = tk.Label(title_frame,
+                          text="🔍 Guest Found in System",
+                          font=("Arial", 18, "bold"),
+                          fg="#E67E22",
+                          bg="#FFFFFF")
+    title_label.pack()
+    
+    subtitle_label = tk.Label(title_frame,
+                             text="We found a matching guest who is currently timed IN",
+                             font=("Arial", 11),
+                             fg="#7F8C8D",
+                             bg="#FFFFFF")
+    subtitle_label.pack(pady=(5, 0))
+    
+    # Guest info display
+    info_frame = tk.LabelFrame(main_frame, 
+                              text=" Guest Information ",
+                              font=("Arial", 12, "bold"),
+                              fg="#2C3E50",
+                              bg="#FFFFFF",
+                              padx=20,
+                              pady=15)
+    info_frame.pack(fill="x", pady=(0, 20))
+    
+    # Display guest details
+    info_items = [
+        ("👤 Name:", guest_info.get('name', 'N/A')),
+        ("🆔 Guest No:", guest_info.get('guest_number', 'N/A')),
+        ("🚗 Plate Number:", guest_info.get('plate_number', 'N/A')),
+        ("🏢 Office Visiting:", guest_info.get('office', 'N/A')),
+        ("📅 Time IN:", f"{guest_info.get('last_date', 'N/A')} at {guest_info.get('last_time', 'N/A')}")
+    ]
+    
+    for label_text, value_text in info_items:
+        row = tk.Frame(info_frame, bg="#FFFFFF")
+        row.pack(fill="x", pady=3)
+        
+        tk.Label(row, 
+                text=label_text,
+                font=("Arial", 11, "bold"),
+                fg="#34495E",
+                bg="#FFFFFF",
+                width=18,
+                anchor="w").pack(side="left")
+        
+        tk.Label(row,
+                text=value_text,
+                font=("Arial", 11),
+                fg="#2C3E50",
+                bg="#FFFFFF").pack(side="left", padx=(10, 0))
+    
+    # Question section
+    question_frame = tk.Frame(main_frame, bg="#E8F4FD", relief="solid", bd=1)
+    question_frame.pack(fill="x", pady=(0, 25))
+    
+    question_content = tk.Frame(question_frame, bg="#E8F4FD")
+    question_content.pack(fill="x", padx=15, pady=12)
+    
+    tk.Label(question_content,
+            text="❓ Is this you? What would you like to do?",
+            font=("Arial", 12, "bold"),
+            fg="#2980B9",
+            bg="#E8F4FD").pack()
+    
+    # Store result
+    result = [None]
+    
+    def proceed_timeout():
+        result[0] = 'timeout'
+        dialog_window.destroy()
+    
+    def register_new_guest():
+        result[0] = 'new_guest'
+        dialog_window.destroy()
+    
+    def retake_license():
+        result[0] = 'retake'
+        dialog_window.destroy()
+    
+    def cancel_action():
+        result[0] = 'cancel'
+        dialog_window.destroy()
+    
+    # Buttons frame with 2 rows
+    button_container = tk.Frame(main_frame, bg="#FFFFFF")
+    button_container.pack(fill="x", pady=(15, 0))
+    
+    # First row of buttons
+    button_frame1 = tk.Frame(button_container, bg="#FFFFFF")
+    button_frame1.pack(fill="x", pady=(0, 10))
+    
+    # Cancel button (left)
+    cancel_button = tk.Button(button_frame1,
+                             text="❌ Cancel",
+                             font=("Arial", 11, "bold"),
+                             bg="#95A5A6",
+                             fg="white",
+                             padx=20,
+                             pady=12,
+                             relief="flat",
+                             cursor="hand2",
+                             command=cancel_action)
+    cancel_button.pack(side="left")
+    
+    # Retake License button (center) - RESTORED RETAKE FUNCTIONALITY
+    retake_button = tk.Button(button_frame1,
+                             text="📷 Retake License",
+                             font=("Arial", 11, "bold"),
+                             bg="#3498DB",
+                             fg="white",
+                             padx=20,
+                             pady=12,
+                             relief="flat",
+                             cursor="hand2",
+                             command=retake_license)
+    retake_button.pack(side="left", padx=(15, 0))
+    
+    # Time Out button (right) - Primary action
+    timeout_button = tk.Button(button_frame1,
+                              text="🚪 Yes, Time Me OUT",
+                              font=("Arial", 11, "bold"),
+                              bg="#E74C3C",
+                              fg="white",
+                              padx=20,
+                              pady=12,
+                              relief="flat",
+                              cursor="hand2",
+                              command=proceed_timeout)
+    timeout_button.pack(side="right")
+    
+    # Second row of buttons
+    button_frame2 = tk.Frame(button_container, bg="#FFFFFF")
+    button_frame2.pack(fill="x")
+    
+    # New Guest button (centered in second row)
+    new_guest_button = tk.Button(button_frame2,
+                                text="👤 Register as New Guest Instead",
+                                font=("Arial", 11, "bold"),
+                                bg="#F39C12",
+                                fg="white",
+                                padx=30,
+                                pady=12,
+                                relief="flat",
+                                cursor="hand2",
+                                command=register_new_guest)
+    new_guest_button.pack()
+    
+    # Add hover effects
+    def on_enter_cancel(e):
+        cancel_button.config(bg="#7F8C8D")
+    def on_leave_cancel(e):
+        cancel_button.config(bg="#95A5A6")
+        
+    def on_enter_retake(e):
+        retake_button.config(bg="#2980B9")
+    def on_leave_retake(e):
+        retake_button.config(bg="#3498DB")
+        
+    def on_enter_timeout(e):
+        timeout_button.config(bg="#C0392B")
+    def on_leave_timeout(e):
+        timeout_button.config(bg="#E74C3C")
+        
+    def on_enter_new_guest(e):
+        new_guest_button.config(bg="#E67E22")
+    def on_leave_new_guest(e):
+        new_guest_button.config(bg="#F39C12")
+    
+    # Bind hover effects
+    cancel_button.bind("<Enter>", on_enter_cancel)
+    cancel_button.bind("<Leave>", on_leave_cancel)
+    retake_button.bind("<Enter>", on_enter_retake)
+    retake_button.bind("<Leave>", on_leave_retake)
+    timeout_button.bind("<Enter>", on_enter_timeout)
+    timeout_button.bind("<Leave>", on_leave_timeout)
+    new_guest_button.bind("<Enter>", on_enter_new_guest)
+    new_guest_button.bind("<Leave>", on_leave_new_guest)
+    
+    # Keyboard shortcuts
+    def on_key_press(event):
+        if event.keysym == 'Return':  # Enter key = Time Out
+            proceed_timeout()
+        elif event.keysym == 'Escape':  # Escape key = Cancel
+            cancel_action()
+        elif event.char.lower() == 'r':  # R key = Retake
+            retake_license()
+        elif event.char.lower() == 'n':  # N key = New Guest
+            register_new_guest()
+        elif event.char.lower() == 't':  # T key = Time Out
+            proceed_timeout()
+    
+    dialog_window.bind('<Key>', on_key_press)
+    dialog_window.focus_set()
+    
+    # Handle window close button (X)
+    def on_window_close():
+        result[0] = 'cancel'
+        dialog_window.destroy()
+    
+    dialog_window.protocol("WM_DELETE_WINDOW", on_window_close)
+    
+    # Wait for user choice
+    dialog_window.wait_window()
+    
+    return result[0]
+    
+# -------------------- STUDENT HELPERS -----------------
 
 def show_student_verification_gui(student_info, verification_data):
     """

@@ -1,4 +1,4 @@
-# ui/admin_gui.py - Complete Fixed Admin Panel GUI
+# ui/admin_gui.py - Complete Fixed Admin Panel GUI with Office Management
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -454,6 +454,223 @@ class AdminPanelGUI:
                               icon='question'):
             self.close()
     
+    def show_office_management(self):
+        """Show office management window"""
+        # Create office management window
+        office_window = tk.Toplevel(self.root)
+        office_window.title("System Maintenance - Office Management")
+        office_window.geometry("700x600")
+        office_window.configure(bg=self.colors['white'])
+        
+        # Center window
+        office_window.update_idletasks()
+        x = (office_window.winfo_screenwidth() // 2) - (350)
+        y = (office_window.winfo_screenheight() // 2) - (300)
+        office_window.geometry(f"700x600+{x}+{y}")
+        
+        # Header
+        header = tk.Frame(office_window, bg=self.colors['primary'], height=80)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        
+        header_content = tk.Frame(header, bg=self.colors['primary'])
+        header_content.pack(expand=True)
+        
+        tk.Label(header_content, text="🏢 SYSTEM MAINTENANCE", 
+                font=("Arial", 20, "bold"), fg=self.colors['white'], 
+                bg=self.colors['primary']).pack(pady=15)
+        
+        tk.Label(header_content, text="Office Management & Security Code Configuration", 
+                font=("Arial", 11), fg=self.colors['light'], 
+                bg=self.colors['primary']).pack()
+        
+        # Content
+        content = tk.Frame(office_window, bg=self.colors['white'])
+        content.pack(fill="both", expand=True)
+        
+        # Add office management section
+        self.create_office_management_section(content)
+        
+        # Footer with close button
+        footer = tk.Frame(office_window, bg=self.colors['light'], height=60)
+        footer.pack(fill="x")
+        footer.pack_propagate(False)
+        
+        close_btn = tk.Button(footer, text="✅ CLOSE", 
+                             font=("Arial", 12, "bold"), 
+                             bg=self.colors['accent'], fg=self.colors['white'],
+                             relief='flat', bd=0, cursor="hand2",
+                             padx=40, pady=12, command=office_window.destroy)
+        close_btn.pack(pady=15)
+
+    def create_office_management_section(self, parent):
+        """Add office management to admin panel"""
+        try:
+            from database.office_operations import get_all_offices, add_office, update_office_code, delete_office
+        except ImportError:
+            # Show error if office operations not available
+            error_frame = tk.Frame(parent, bg=self.colors['white'])
+            error_frame.pack(fill="x", padx=10, pady=5)
+            tk.Label(error_frame, text="⚠️ Office Management System Not Available", 
+                    font=("Arial", 12, "bold"), fg=self.colors['accent'], 
+                    bg=self.colors['white']).pack(pady=20)
+            return
+        
+        # Office Management Frame
+        office_frame = tk.LabelFrame(parent, text="🏢 Office Management & Security Codes", 
+                                    font=("Arial", 12, "bold"), 
+                                    bg=self.colors['white'], fg=self.colors['primary'],
+                                    relief="ridge", bd=2)
+        office_frame.pack(fill="x", padx=10, pady=5)
+        
+        # Instructions
+        instruction_label = tk.Label(office_frame, 
+                                    text="Manage visitor offices and their 3-digit security codes for timeout verification",
+                                    font=("Arial", 10), fg=self.colors['secondary'],
+                                    bg=self.colors['white'])
+        instruction_label.pack(pady=(10, 0))
+        
+        # Office list with scrollbar
+        list_frame = tk.Frame(office_frame, bg=self.colors['white'])
+        list_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        offices_list = tk.Listbox(list_frame, height=8, font=("Arial", 10))
+        scrollbar = tk.Scrollbar(list_frame, orient="vertical", command=offices_list.yview)
+        offices_list.configure(yscrollcommand=scrollbar.set)
+        
+        offices_list.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        def refresh_office_list():
+            offices_list.delete(0, tk.END)
+            offices = get_all_offices()
+            for office in offices:
+                offices_list.insert(tk.END, f"{office['office_name']} (Code: {office['office_code']})")
+        
+        # Buttons frame
+        btn_frame = tk.Frame(office_frame, bg=self.colors['white'])
+        btn_frame.pack(fill="x", padx=10, pady=(0, 10))
+        
+        def add_new_office():
+            office_name = simpledialog.askstring("Add Office", "Enter office name:")
+            if office_name and office_name.strip():
+                if add_office(office_name.strip()):
+                    messagebox.showinfo("Success", f"Office '{office_name}' added successfully!\nA unique 3-digit code has been generated.")
+                    refresh_office_list()
+                else:
+                    messagebox.showerror("Error", "Failed to add office!")
+        
+        def update_office_code_gui():
+            selection = offices_list.curselection()
+            if not selection:
+                messagebox.showwarning("Warning", "Please select an office first!")
+                return
+            
+            office_text = offices_list.get(selection[0])
+            office_name = office_text.split(" (Code:")[0]
+            current_code = office_text.split("Code: ")[1].replace(")", "")
+            
+            new_code = simpledialog.askstring("Update Security Code", 
+                                             f"Current code for '{office_name}': {current_code}\n\nEnter new 3-digit code:")
+            if new_code and new_code.strip():
+                if update_office_code(office_name, new_code.strip()):
+                    messagebox.showinfo("Success", f"Security code updated for '{office_name}'!")
+                    refresh_office_list()
+                else:
+                    messagebox.showerror("Error", "Failed to update code! Make sure it's exactly 3 digits and not already in use.")
+        
+        def delete_office_gui():
+            selection = offices_list.curselection()
+            if not selection:
+                messagebox.showwarning("Warning", "Please select an office first!")
+                return
+            
+            office_text = offices_list.get(selection[0])
+            office_name = office_text.split(" (Code:")[0]
+            
+            if messagebox.askyesno("Confirm Delete", 
+                                  f"Delete office '{office_name}'?\n\nThis will:\n• Remove the office from visitor selection\n• Disable its security code\n• This action cannot be undone!"):
+                if delete_office(office_name):
+                    messagebox.showinfo("Success", f"Office '{office_name}' deleted!")
+                    refresh_office_list()
+                else:
+                    messagebox.showerror("Error", "Failed to delete office!")
+        
+        def show_office_codes():
+            """Show all office codes for reference"""
+            offices = get_all_offices()
+            if not offices:
+                messagebox.showinfo("No Offices", "No offices found in the system.")
+                return
+            
+            codes_text = "🏢 OFFICE SECURITY CODES:\n" + "="*40 + "\n"
+            for office in offices:
+                codes_text += f"• {office['office_name']}: {office['office_code']}\n"
+            
+            codes_text += "\n⚠️ These codes are used for secure guest timeout verification."
+            
+            # Create a window to display codes
+            codes_window = tk.Toplevel(self.root)
+            codes_window.title("Office Security Codes")
+            codes_window.geometry("400x300")
+            codes_window.configure(bg=self.colors['white'])
+            
+            # Center window
+            codes_window.update_idletasks()
+            x = (codes_window.winfo_screenwidth() // 2) - (200)
+            y = (codes_window.winfo_screenheight() // 2) - (150)
+            codes_window.geometry(f"400x300+{x}+{y}")
+            
+            # Text widget with scrollbar
+            text_frame = tk.Frame(codes_window, bg=self.colors['white'])
+            text_frame.pack(fill="both", expand=True, padx=20, pady=20)
+            
+            text_widget = tk.Text(text_frame, font=("Courier", 11), wrap="word")
+            text_scrollbar = tk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
+            text_widget.configure(yscrollcommand=text_scrollbar.set)
+            
+            text_widget.insert("1.0", codes_text)
+            text_widget.config(state="disabled")  # Make read-only
+            
+            text_widget.pack(side="left", fill="both", expand=True)
+            text_scrollbar.pack(side="right", fill="y")
+            
+            # Close button
+            tk.Button(codes_window, text="Close", command=codes_window.destroy,
+                     bg=self.colors['primary'], fg="white", font=("Arial", 10, "bold"),
+                     cursor="hand2").pack(pady=10)
+        
+        # Buttons row 1
+        btn_row1 = tk.Frame(btn_frame, bg=self.colors['white'])
+        btn_row1.pack(fill="x", pady=(0, 5))
+        
+        tk.Button(btn_row1, text="➕ Add Office", command=add_new_office,
+                 bg=self.colors['success'], fg="white", font=("Arial", 9, "bold"),
+                 cursor="hand2", padx=15, pady=5).pack(side="left", padx=5)
+        
+        tk.Button(btn_row1, text="🔄 Update Code", command=update_office_code_gui,
+                 bg=self.colors['warning'], fg="white", font=("Arial", 9, "bold"),
+                 cursor="hand2", padx=15, pady=5).pack(side="left", padx=5)
+        
+        tk.Button(btn_row1, text="🗑️ Delete Office", command=delete_office_gui,
+                 bg=self.colors['accent'], fg="white", font=("Arial", 9, "bold"),
+                 cursor="hand2", padx=15, pady=5).pack(side="left", padx=5)
+        
+        # Buttons row 2
+        btn_row2 = tk.Frame(btn_frame, bg=self.colors['white'])
+        btn_row2.pack(fill="x")
+        
+        tk.Button(btn_row2, text="🔍 View All Codes", command=show_office_codes,
+                 bg=self.colors['info'], fg="white", font=("Arial", 9, "bold"),
+                 cursor="hand2", padx=15, pady=5).pack(side="left", padx=5)
+        
+        tk.Button(btn_row2, text="🔄 Refresh List", command=refresh_office_list,
+                 bg=self.colors['secondary'], fg="white", font=("Arial", 9, "bold"),
+                 cursor="hand2", padx=15, pady=5).pack(side="right", padx=5)
+        
+        # Load initial data
+        refresh_office_list()
+    
     # Helper functions
     def run_function(self, function_name):
         """Run admin function and show result"""
@@ -787,7 +1004,7 @@ class AdminPanelGUI:
                 bg=self.colors['dark']).pack(anchor="w", pady=(5, 0))
     
     def create_menu_cards(self, parent):
-        """Create enhanced menu cards"""
+        """Create enhanced menu cards - FIXED with proper row3 definition"""
         # Title
         tk.Label(parent, text="SYSTEM FUNCTIONS", 
                 font=("Arial", 20, "bold"), fg=self.colors['primary'], 
@@ -797,12 +1014,15 @@ class AdminPanelGUI:
         cards_container = tk.Frame(parent, bg=self.colors['white'])
         cards_container.pack(fill="both", expand=True, padx=40)
         
-        # Create two rows of cards
+        # Create three rows of cards - FIXED
         row1 = tk.Frame(cards_container, bg=self.colors['white'])
         row1.pack(fill="x", pady=(0, 20))
         
         row2 = tk.Frame(cards_container, bg=self.colors['white'])
-        row2.pack(fill="x")
+        row2.pack(fill="x", pady=(0, 20))
+        
+        row3 = tk.Frame(cards_container, bg=self.colors['white'])  # FIXED: Now properly defined
+        row3.pack(fill="x")
         
         # Row 1 cards
         self.create_function_card(row1, "👤", "Enroll New User", 
@@ -829,6 +1049,11 @@ class AdminPanelGUI:
         self.create_function_card(row2, "🧹", "Clear Records", 
                                  "Delete time records",
                                  self.clear_time_records, self.colors['dark'])
+        
+        # Row 3 - NEW: System Maintenance (Office Management)
+        self.create_function_card(row3, "🏢", "System Maintenance", 
+                                 "Manage visitor offices & security codes",
+                                 self.show_office_management, self.colors['gold'])
     
     def create_function_card(self, parent, icon, title, description, command, color):
         """Create an enhanced function card"""
