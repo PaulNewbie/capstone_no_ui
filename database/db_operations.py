@@ -366,7 +366,7 @@ def search_guests(search_term: str) -> List[Dict]:
 # ==================== OTHERS for GUEST =====================
 
 def get_guest_time_status(detected_name, plate_number=None):
-    """Get current time status of guest - updated without last_visit"""
+    """Get current time status of guest - FIXED to only check guests currently IN"""
     try:
         import sqlite3
         from difflib import SequenceMatcher
@@ -386,13 +386,14 @@ def get_guest_time_status(detected_name, plate_number=None):
         all_records = cursor.fetchall()
         conn.close()
         
-        # Filter to latest records only
-        latest_records = [record for record in all_records if record[5] == 1]
+        # Filter to latest records only, AND only those currently IN
+        latest_records = [record for record in all_records 
+                         if record[5] == 1 and record[2] == 'IN']  # row_num == 1 and action == 'IN'
         
         if not latest_records:
             return None, None
         
-        print(f"🔍 Checking against {len(latest_records)} guest records...")
+        print(f"🔍 Checking against {len(latest_records)} guests currently IN...")
         
         # Find best name match
         best_match = None
@@ -432,20 +433,20 @@ def get_guest_time_status(detected_name, plate_number=None):
                 'guest_number': best_match[0].replace('GUEST_', ''),  # Just the plate number
                 'plate_number': best_match[0].replace('GUEST_', ''),
                 'office': guest_db_info['office'] if guest_db_info else 'Previous Visit',
-                'current_status': best_match[2],  # action (IN/OUT)
+                'current_status': best_match[2],  # action (should always be 'IN' now)
                 'last_date': best_match[3],
                 'last_time': best_match[4],
                 'similarity_score': highest_similarity
             }
             
-            return best_match[2], guest_info  # action (IN/OUT), guest_info
+            return best_match[2], guest_info  # action ('IN'), guest_info
         
         return None, None
         
     except Exception as e:
         print(f"❌ Error checking guest status: {e}")
         return None, None
-
+        
 def get_guest_from_database(plate_number=None, name=None):
     """Retrieve guest information from guests table - updated without last_visit"""
     try:

@@ -36,7 +36,7 @@ def student_verification():
     gui.run()
 
 def run_verification_with_gui(status_callback):
-    """Run verification steps with GUI status updates - FIXED key name"""
+    """Run verification steps with GUI status updates - COMPLETE VERSION"""
     
     # Initialize systems
     init_buzzer()
@@ -167,40 +167,21 @@ def run_verification_with_gui(status_callback):
             
             if 'days_until_expiration' in user_info:
                 days_left = user_info['days_until_expiration']
-                license_expiration_valid = days_left > 0
-            else:
-                if 'license_expiration' in user_info:
-                    license_expiration_valid = check_license_expiration(user_info)
-                    if license_expiration_valid:
-                        expiration_date_str = user_info.get('license_expiration', '')
-                        try:
-                            try:
-                                expiration_date = datetime.strptime(expiration_date_str, '%Y-%m-%d')
-                            except ValueError:
-                                try:
-                                    expiration_date = datetime.strptime(expiration_date_str, '%m/%d/%Y')
-                                except ValueError:
-                                    expiration_date = datetime.strptime(expiration_date_str, '%d/%m/%Y')
-                            
-                            current_date = datetime.now()
-                            days_left = (expiration_date.date() - current_date.date()).days
-                            user_info['days_until_expiration'] = days_left
-                            
-                        except Exception as e:
-                            print(f"❌ Error calculating days until expiration: {e}")
-                            days_left = 0
-                            license_expiration_valid = False
-                    else:
-                        days_left = 0
+                license_expiration_valid = days_left >= 0
+            elif 'license_expiration' in user_info:
+                license_expiration_valid = check_license_expiration(user_info)
+                if license_expiration_valid:
+                    days_left = 30  # Default for valid
                 else:
-                    license_expiration_valid = True
-                    print("ℹ️ No license expiration data found, assuming valid")
+                    days_left = -1  # Default for expired
+            else:
+                license_expiration_valid = True  # Default if no expiration data
+                days_left = 365  # Default
             
-            # Update GUI with license expiration info
+            # Update GUI with license status
             status_callback({
-                'license_expiration': {
-                    'valid': license_expiration_valid,
-                    'days_left': days_left,
+                'license_info': {
+                    'number': user_info.get('license_number', 'N/A'),
                     'expiration_date': user_info.get('license_expiration', 'N/A')
                 }
             })
@@ -209,7 +190,7 @@ def run_verification_with_gui(status_callback):
             if not license_expiration_valid:
                 status_callback({
                     'license_status': 'EXPIRED',
-                    'current_step': f'❌ License expired ({days_left} days overdue)'
+                    'current_step': f'❌ License expired ({abs(days_left)} days overdue)'
                 })
                 set_led_idle()
                 play_failure()
@@ -233,17 +214,41 @@ def run_verification_with_gui(status_callback):
             for attempt in range(2):  # Try twice
                 print(f"\n📷 License attempt {attempt + 1}/2")
                 
+                # FIXED: Create proper fingerprint_info structure for license verification
+                fingerprint_info = {
+                    'name': user_info.get('name', ''),  # This is the reference name from fingerprint
+                    'confidence': user_info.get('confidence', 100),
+                    'user_type': user_info.get('user_type', 'STUDENT'),
+                    'finger_id': user_info.get('finger_id', 'N/A')
+                }
+                
                 image_path = auto_capture_license_rpi(
                     reference_name=user_info.get('name', ''),
-                    fingerprint_info=user_info
+                    fingerprint_info=fingerprint_info  # Pass properly formatted fingerprint_info
                 )
                 
                 if image_path:
                     ocr_text = extract_text_from_image(image_path)
-                    if _count_verification_keywords(ocr_text) >= 3:
+                    keywords_found = _count_verification_keywords(ocr_text)
+                    
+                    # FIXED: Also check for name matching, not just license keywords
+                    from services.license_reader import find_best_line_match
+                    ocr_lines = [line.strip() for line in ocr_text.splitlines() if line.strip()]
+                    _, name_match_score = find_best_line_match(user_info.get('name', ''), ocr_lines)
+                    
+                    # Success if we have enough keywords OR good name match (60%+)
+                    has_good_keywords = keywords_found >= 3
+                    has_good_name_match = name_match_score and name_match_score >= 0.6
+                    
+                    if has_good_keywords or has_good_name_match:
+                        if has_good_name_match:
+                            print(f"✅ License accepted: Name match {name_match_score*100:.1f}% (Keywords: {keywords_found})")
+                        else:
+                            print(f"✅ License accepted: Keywords {keywords_found} (Name match: {(name_match_score*100):.1f}%)")
                         license_success = True
                         break
                     elif attempt == 0:  # First attempt failed
+                        print(f"⚠️ Poor scan: Keywords {keywords_found}, Name match {(name_match_score*100 if name_match_score else 0):.1f}%")
                         if not msgbox.askyesno("Retry?", "Poor scan quality. Try again?"):
                             break
             
@@ -276,16 +281,20 @@ def run_verification_with_gui(status_callback):
                             cleanup_buzzer()
                             return {'verified': False, 'reason': 'Failed to record time'}
                     else:
+                        cleanup_buzzer()
                         return {'verified': False, 'reason': 'Admin override failed'}
                 else:
+                    cleanup_buzzer()
                     return {'verified': False, 'reason': 'License verification cancelled'}
             
-            # ONLY run verification flow if license_success is True
-            if license_success:
-                # Verify license
-                is_fully_verified = complete_verification_flow(
+            # ONLY run verification flow if license captured successfully
+            if license_success and image_path:
+                status_callback({'current_step': '🔍 Verifying license against fingerprint...'})
+                
+                # FIXED: Pass the properly formatted fingerprint_info
+                verification_result = complete_verification_flow(
                     image_path=image_path,
-                    fingerprint_info=user_info,
+                    fingerprint_info=fingerprint_info,  # Use the properly formatted fingerprint_info
                     helmet_verified=True,
                     license_expiration_valid=license_expiration_valid
                 )
@@ -295,12 +304,12 @@ def run_verification_with_gui(status_callback):
                     'helmet': True,
                     'fingerprint': True,
                     'license_valid': license_expiration_valid,
-                    'license_detected': "Driver's License Detected" in str(is_fully_verified),
-                    'name_match': is_fully_verified
+                    'license_detected': verification_result,
+                    'name_match': verification_result
                 }
                 status_callback({'verification_summary': verification_summary})
                 
-                if is_fully_verified:
+                if verification_result:
                     # Record TIME IN
                     if record_time_in(user_info):
                         timestamp = time.strftime('%H:%M:%S')
@@ -313,34 +322,39 @@ def run_verification_with_gui(status_callback):
                             'name': user_info['name'],
                             'time_action': 'IN',
                             'timestamp': timestamp,
+                            'student_id': user_info.get('student_id', 'N/A')
                         }
-                        cleanup_buzzer()
-                        return result
                     else:
-                        status_callback({'current_step': '❌ Failed to record time'})
+                        status_callback({'current_step': '❌ Failed to record TIME IN'})
                         set_led_idle()
                         play_failure()
-                        cleanup_buzzer()
-                        return {'verified': False, 'reason': 'Failed to record time'}
+                        result = {'verified': False, 'reason': 'Failed to record TIME IN'}
                 else:
                     status_callback({'current_step': '❌ License verification failed'})
                     set_led_idle()
                     play_failure()
-                    cleanup_buzzer()
-                    return {'verified': False, 'reason': 'License verification failed'}
+                    result = {'verified': False, 'reason': 'License verification failed'}
+            else:
+                status_callback({'current_step': '❌ License capture failed'})
+                set_led_idle()
+                play_failure()
+                result = {'verified': False, 'reason': 'License capture failed'}
                 
     except Exception as e:
-        print(f"❌ Error in verification: {e}")
-        status_callback({'current_step': f'❌ Error: {str(e)}'})
+        print(f"❌ Verification error: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        status_callback({'current_step': f'❌ System error: {str(e)}'})
         set_led_idle()
         play_failure()
-        result = {'verified': False, 'reason': f'Error: {str(e)}'}
+        result = {'verified': False, 'reason': f'System error: {str(e)}'}
     
     finally:
         cleanup_buzzer()
-    
+        
     return result
-    
+        
 def check_license_expiration(user_info):
     """Check if license is expired"""
     try:

@@ -18,7 +18,7 @@ class GuestVerificationGUI:
         
     def setup_window(self):
         """Setup the main window"""
-        self.root.title("MotorPass - Guest Verification")
+        self.root.title("MotorPass - VISITOR Verification")
         self.root.configure(bg='#8B4513')
         
         # Get screen dimensions
@@ -39,7 +39,7 @@ class GuestVerificationGUI:
         """Create all tkinter variables"""
         self.helmet_status = tk.StringVar(value="PENDING")
         self.license_status = tk.StringVar(value="PENDING")
-        self.current_step = tk.StringVar(value="🚀 Starting guest verification...")
+        self.current_step = tk.StringVar(value="🚀 Starting visitor verification...")
         self.time_string = tk.StringVar()
         self.date_string = tk.StringVar()
         self.update_time()
@@ -75,7 +75,7 @@ class GuestVerificationGUI:
         content_frame.pack(fill="both", expand=True, padx=40, pady=20)
         
         # Title
-        title_label = tk.Label(content_frame, text="GUEST VERIFICATION", 
+        title_label = tk.Label(content_frame, text="VISITOR VERIFICATION", 
                               font=("Arial", 36, "bold"), fg="#FFFFFF", bg='#8B4513')
         title_label.pack(pady=(0, 30))
         
@@ -137,7 +137,7 @@ class GuestVerificationGUI:
         
         tk.Label(title_frame, text="MotorPass", font=("Arial", 32, "bold"), 
                 fg="#DAA520", bg='#46230a').pack(anchor="w")
-        tk.Label(title_frame, text="Guest Access Control System",
+        tk.Label(title_frame, text="Visitor Access Control System",
                 font=("Arial", 11), fg="#FFFFFF", bg='#46230a').pack(anchor="w")
         
         # Clock
@@ -245,7 +245,7 @@ class GuestVerificationGUI:
         details_container.pack(fill="both", expand=True)
         
         # Title
-        tk.Label(details_container, text="GUEST INFORMATION", 
+        tk.Label(details_container, text="VISITOR INFORMATION", 
                 font=("Arial", 20, "bold"), fg="#333333", bg='white').pack(pady=20)
         
         # Details content
@@ -254,7 +254,7 @@ class GuestVerificationGUI:
         
         # Initial message
         self.initial_message = tk.Label(self.details_content, 
-                                       text="Starting guest verification...\nPlease check the terminal window for camera operations.",
+                                       text="Starting visitor verification...\nPlease check the terminal window for camera operations.",
                                        font=("Arial", 14), fg="#666666", bg='white', justify="center")
         self.initial_message.pack(expand=True)
         
@@ -287,7 +287,7 @@ class GuestVerificationGUI:
         footer.pack(fill="x")
         footer.pack_propagate(False)
         
-        footer_text = "🪖 Helmet Required → 📄 License Scan → 📝 Guest Registration | ESC to exit"
+        footer_text = "🪖 Helmet Required → 📄 License Scan → 📝 Visitor Registration | ESC to exit"
         tk.Label(footer, text=footer_text, font=("Arial", 12), 
                 fg="#FFFFFF", bg='#46230a').pack(expand=True)
     
@@ -382,7 +382,7 @@ class GuestVerificationGUI:
                 icon_label = tk.Label(content, text="✅", font=("Arial", 60), bg='white')
                 icon_label.pack()
                 
-                title = tk.Label(content, text="GUEST ACCESS GRANTED", 
+                title = tk.Label(content, text="VISITOR ACCESS GRANTED", 
                                font=("Arial", 28, "bold"), fg="#28a745", bg='white')
                 title.pack(pady=(20, 10))
                 
@@ -448,7 +448,7 @@ class GuestVerificationGUI:
     
     def start_verification(self):
         """Start verification in separate thread"""
-        self.current_step.set("🚀 Initializing guest verification...")
+        self.current_step.set("🚀 Initializing visitor verification...")
         
         # Run verification in thread
         thread = threading.Thread(target=self.run_verification_thread, daemon=True)

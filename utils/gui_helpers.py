@@ -123,6 +123,7 @@ def get_guest_info_gui(detected_name=""):
         
     Returns:
         dict or None: Guest information or None if cancelled
+        str: 'retake' if user wants to retake license scan
     """
     # Create input window
     info_window = tk.Toplevel()
@@ -204,12 +205,18 @@ def get_guest_info_gui(detected_name=""):
         info_window.destroy()
     
     def cancel():
+        result[0] = None
         info_window.destroy()
     
-    # Buttons
+    def retake_license():
+        result[0] = 'retake'
+        info_window.destroy()
+    
+    # Buttons frame
     button_frame = tk.Frame(main_frame, bg="#FFFFFF")
     button_frame.pack(fill="x", pady=(10, 0))
     
+    # Cancel button (left)
     cancel_button = tk.Button(button_frame,
                              text="Cancel",
                              font=("Arial", 10, "bold"),
@@ -217,9 +224,25 @@ def get_guest_info_gui(detected_name=""):
                              fg="white",
                              padx=20,
                              pady=8,
+                             relief="raised",
+                             cursor="hand2",
                              command=cancel)
     cancel_button.pack(side="left")
     
+    # Retake License button (center) - NEW BUTTON ADDED HERE
+    retake_button = tk.Button(button_frame,
+                             text="📷 Retake License",
+                             font=("Arial", 10, "bold"),
+                             bg="#3498DB",
+                             fg="white",
+                             padx=20,
+                             pady=8,
+                             relief="raised",
+                             cursor="hand2",
+                             command=retake_license)
+    retake_button.pack(side="left", padx=(10, 0))
+    
+    # Submit button (right)
     submit_button = tk.Button(button_frame,
                              text="Submit",
                              font=("Arial", 10, "bold"),
@@ -227,17 +250,34 @@ def get_guest_info_gui(detected_name=""):
                              fg="white",
                              padx=20,
                              pady=8,
+                             relief="raised",
+                             cursor="hand2",
                              command=submit_info)
     submit_button.pack(side="right")
     
-    # Focus on name field
-    name_entry.focus()
+    # Test button functionality
+    print("🔧 Button commands configured:")
+    print(f"   Cancel: {cancel_button['command']}")
+    print(f"   Retake: {retake_button['command']}")
+    print(f"   Submit: {submit_button['command']}")
     
-    # Bind Enter key to submit
-    def on_enter(event):
-        submit_info()
+    # Force button update
+    cancel_button.update()
+    retake_button.update()
+    submit_button.update()
     
-    info_window.bind('<Return>', on_enter)
+    # Focus on name field initially, but allow button focus
+    name_entry.focus_set()
+    
+    # Remove automatic Enter key binding to submit
+    # Let users click buttons manually to avoid accidents
+    
+    # Handle window close button (X) - Fix cancel functionality
+    def on_window_close():
+        result[0] = None
+        info_window.destroy()
+    
+    info_window.protocol("WM_DELETE_WINDOW", on_window_close)
     
     # Make window modal
     info_window.transient()
@@ -245,7 +285,7 @@ def get_guest_info_gui(detected_name=""):
     info_window.wait_window()
     
     return result[0]
-
+     
 def updated_guest_office_gui(guest_name, current_office):
     """
     Get updated office information for returning guest

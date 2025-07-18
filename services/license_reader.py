@@ -1087,6 +1087,7 @@ def licenseRead(image_path: str, fingerprint_info: dict) -> NameInfo:
         safe_delete_temp_file(image_path)
 
 def licenseReadGuest(image_path: str, guest_info: dict) -> NameInfo:
+    """Updated licenseReadGuest function with proper GUI integration"""
     reference_name = guest_info['name']  # Use guest name as reference
     current_image_path = image_path
     
@@ -1126,26 +1127,42 @@ def licenseReadGuest(image_path: str, guest_info: dict) -> NameInfo:
                 print(f"🎯 Guest name match found: {reference_name} ↔ {detected_name} ({sim_score*100:.1f}%)")
                 return packaged
             
-            # If no match, offer retake (same as student/staff)
-            if not _retake_prompt(reference_name, detected_name):
+            # Use the enhanced retake prompt with explicit guest parameter
+            choice = _retake_prompt_enhanced(reference_name, detected_name, is_guest=True)
+            
+            if choice == 'retake':
+                # Continue with retake logic
+                if current_image_path != image_path:
+                    safe_delete_temp_file(current_image_path)
+                
+                # Create guest-specific retry info
+                guest_retry_info = {
+                    'name': reference_name,
+                    'user_type': 'GUEST',
+                    'confidence': 100
+                }
+                
+                retake_image_path = auto_capture_license_rpi(reference_name, guest_retry_info, retry_mode=True)
+                
+                if retake_image_path:
+                    current_image_path = retake_image_path
+                else:
+                    return packaged
+                    
+            elif choice == 'accept':
+                # Accept the current result
+                print("✅ Guest accepted current scan result")
                 return packaged
-            
-            if current_image_path != image_path:
-                safe_delete_temp_file(current_image_path)
-            
-            # Create guest-specific retry info
-            guest_retry_info = {
-                'name': reference_name,
-                'user_type': 'GUEST',
-                'confidence': 100
-            }
-            
-            retake_image_path = auto_capture_license_rpi(reference_name, guest_retry_info, retry_mode=True)
-            
-            if retake_image_path:
-                current_image_path = retake_image_path
-            else:
-                return packaged
+                
+            else:  # choice == 'cancel'
+                # Return cancelled result
+                print("❌ Guest cancelled license verification")
+                error_packaged = package_name_info(
+                    {"Name": "Verification Cancelled", "Document Verified": "Cancelled by User"}, 
+                    "Guest cancelled verification", guest_fingerprint_info
+                )
+                error_packaged.match_score = 0.0
+                return error_packaged
         
     except Exception:
         error_packaged = package_name_info(
@@ -1158,7 +1175,7 @@ def licenseReadGuest(image_path: str, guest_info: dict) -> NameInfo:
         if current_image_path != image_path:
             safe_delete_temp_file(current_image_path)
         safe_delete_temp_file(image_path)
-        
+              
 def get_guest_name_from_license_image(image_path: str) -> str:
     try:
         extraction = extract_guest_name_from_license_simple(image_path)
@@ -1168,7 +1185,53 @@ def get_guest_name_from_license_image(image_path: str) -> str:
         return "Guest"
 
 def _retake_prompt(expected_name: str, detected_name: str) -> bool:
+    """
+    Show retake prompt - uses GUI for guest verification, console for student/staff
+    
+    Args:
+        expected_name (str): Expected name from fingerprint/guest info
+        detected_name (str): Name detected from license OCR
+        
+    Returns:
+        bool: True if user wants to retake, False if accept or cancel
+    """
     print(f"⚠️ Name mismatch: Expected '{expected_name}', found '{detected_name}'")
+    
+    # Check if this is called from guest verification
+    # We can detect this by checking the call stack or adding a parameter
+    import inspect
+    
+    # Check if any function in the call stack contains 'guest'
+    is_guest_verification = False
+    for frame_info in inspect.stack():
+        frame_name = frame_info.function.lower()
+        if 'guest' in frame_name or 'licensereadguest' in frame_name:
+            is_guest_verification = True
+            break
+    
+    if is_guest_verification:
+        try:
+            # Use GUI dialog for guest verification
+            from utils.gui_helpers import guest_license_verification_dialog
+            
+            choice = guest_license_verification_dialog(expected_name, detected_name)
+            
+            if choice == 'retake':
+                print("📷 Guest chose to retake license photo")
+                return True
+            elif choice == 'accept':
+                print("✅ Guest accepted the detected name")
+                return False
+            else:  # 'cancel' or None
+                print("❌ Guest cancelled verification")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Error showing guest license dialog: {e}")
+            print("📱 Falling back to console input...")
+            # Fall through to console input below
+    
+    # Console input for student/staff verification (unchanged)
     choice = input("Retake photo? (y/n): ").strip().lower()
     return choice == 'y'
 

@@ -298,7 +298,7 @@ class MotorPassGUI:
         
         # Create user type buttons with enhanced modern styling
         self.create_enhanced_button(buttons_frame, "👨‍🎓 STUDENT/STAFF", self.student_staff_clicked, "#D4AF37", "#8B7355")
-        self.create_enhanced_button(buttons_frame, "👤 GUEST", self.guest_clicked, "#D4AF37", "#8B7355")
+        self.create_enhanced_button(buttons_frame, "👤 VISITOR", self.guest_clicked, "#D4AF37", "#8B7355")
         self.create_enhanced_button(buttons_frame, "⚙️ ADMIN", self.admin_clicked, "#CD853F", "#A0522D")
         
         # Separator line
