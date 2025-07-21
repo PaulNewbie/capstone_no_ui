@@ -2,7 +2,7 @@
 
 import tkinter as tk
 from tkinter import messagebox
-from database.office_operations import verify_office_code
+from database.office_operation import verify_office_code
 
 def timeout_security_verification(guest_info, max_attempts=3):
     """
