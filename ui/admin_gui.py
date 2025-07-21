@@ -506,7 +506,7 @@ class AdminPanelGUI:
     def create_office_management_section(self, parent):
         """Add office management to admin panel"""
         try:
-            from database.office_operations import get_all_offices, add_office, update_office_code, delete_office
+            from database.office_operation import get_all_offices, add_office, update_office_code, delete_office
         except ImportError:
             # Show error if office operations not available
             error_frame = tk.Frame(parent, bg=self.colors['white'])

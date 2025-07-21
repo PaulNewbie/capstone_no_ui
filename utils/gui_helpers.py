@@ -83,7 +83,7 @@ def get_guest_info_gui(detected_name=""):
     """Enhanced guest info GUI with office buttons, mouse support, AND retake functionality"""
     # Try to import office operations
     try:
-        from database.office_operations import get_all_offices
+        from database.office_operation import get_all_offices
         offices_data = get_all_offices()
         use_office_buttons = True
     except ImportError:
